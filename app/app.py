@@ -147,12 +147,12 @@ def validate_upload(file_storage):
         raise UserError("Formato no permitido. Solo se aceptan imagenes JPG o PNG.")
     data = file_storage.read()
     if not data:
-        raise UserError("El archivo esta vacio.")
+        raise UserError("El archivo está vacío.")
     if len(data) > MAX_MB * 1024 * 1024:
-        raise UserError("La imagen supera el tamano maximo de %d MB." % MAX_MB)
+        raise UserError("La imagen supera el tamaño máximo de %d MB." % MAX_MB)
     family, content_type = ALLOWED[ext]
     if sniff_family(data[:16]) != family:
-        raise UserError("El contenido del archivo no corresponde a una imagen %s valida." % ext.upper())
+        raise UserError("El contenido del archivo no corresponde a una imagen %s válida." % ext.upper())
     return data, ext, content_type, name[:200]
 
 
@@ -206,69 +206,177 @@ def local_time(dt):
 LAYOUT = """<!doctype html>
 <html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ title }} - Analisis de imagenes</title>
+<title>{{ title }} · Visión</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <style>
- body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f6f7f9;color:#1d2433}
- header{background:#232f3e;color:#fff;padding:14px 20px;display:flex;gap:20px;align-items:center;flex-wrap:wrap}
- header a{color:#fff;text-decoration:none;font-weight:600} header .brand{font-size:1.1rem;margin-right:auto}
- main{max-width:960px;margin:24px auto;padding:0 16px}
- .card{background:#fff;border:1px solid #e1e4e8;border-radius:10px;padding:20px;margin-bottom:20px}
- .error{background:#fdecea;border:1px solid #f5c2c0;color:#8a1c14;padding:12px;border-radius:8px;margin-bottom:16px}
- .ok{background:#e6f4ea;border:1px solid #b7dfc2;color:#1e5b2e;padding:12px;border-radius:8px;margin-bottom:16px}
- button{background:#ff9900;border:0;color:#111;font-weight:700;padding:10px 18px;border-radius:8px;cursor:pointer}
- table{border-collapse:collapse;width:100%} th,td{text-align:left;padding:8px;border-bottom:1px solid #eee}
- .bar{background:#eef1f5;border-radius:6px;height:10px;width:100%} .bar span{display:block;height:10px;border-radius:6px;background:#2f7de1}
- img.preview{max-width:100%;max-height:420px;border-radius:8px} img.thumb{width:72px;height:72px;object-fit:cover;border-radius:6px}
- footer{text-align:center;color:#6a7385;font-size:.85rem;padding:20px}
- .muted{color:#6a7385}
+ :root{--bg:#fafaf9;--surface:#ffffff;--line:#e7e5e4;--ink:#1c1917;--muted:#78716c;--soft:#f5f5f4;
+  --accent:#4f46e5;--accent-hover:#4338ca;--accent-soft:#eef2ff;--ok:#15803d;--ok-soft:#f0fdf4;--bad:#b91c1c;--bad-soft:#fef2f2;
+  --radius:16px;--shadow:0 1px 2px rgba(28,25,23,.04),0 8px 24px rgba(28,25,23,.06)}
+ *{box-sizing:border-box}
+ body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.5}
+ a{color:inherit}
+ .top{position:sticky;top:0;z-index:5;background:rgba(250,250,249,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+ .top-in{max-width:1040px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:16px}
+ .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:700;letter-spacing:-.01em;margin-right:auto}
+ .logo{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#6366f1,#a855f7);display:grid;place-items:center}
+ .logo svg{width:16px;height:16px;stroke:#fff}
+ .tabs{display:flex;gap:4px;background:var(--soft);padding:4px;border-radius:999px}
+ .tabs a{text-decoration:none;font-size:.9rem;font-weight:500;color:var(--muted);padding:6px 14px;border-radius:999px;transition:.15s}
+ .tabs a:hover{color:var(--ink)}
+ .tabs a.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+ main{max-width:1040px;margin:0 auto;padding:40px 24px 24px}
+ h1{font-size:2rem;letter-spacing:-.025em;margin:0 0 6px}
+ h2{font-size:1.1rem;margin:0 0 16px;letter-spacing:-.01em}
+ .lead{color:var(--muted);margin:0 0 28px}
+ .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:24px}
+ .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;font:600 .95rem/1 Inter,system-ui,sans-serif;
+  padding:12px 20px;border-radius:12px;border:1px solid transparent;cursor:pointer;text-decoration:none;transition:.15s}
+ .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(79,70,229,.3),inset 0 1px 0 rgba(255,255,255,.15)}
+ .btn-primary:hover{background:var(--accent-hover);transform:translateY(-1px)}
+ .btn-primary:disabled{background:#c7d2fe;box-shadow:none;cursor:not-allowed;transform:none}
+ .btn-ghost{background:var(--surface);border-color:var(--line);color:var(--ink)}
+ .btn-ghost:hover{background:var(--soft)}
+ .alert{display:flex;gap:10px;align-items:flex-start;padding:12px 16px;border-radius:12px;margin-bottom:20px;font-size:.95rem}
+ .alert svg{flex:none;width:18px;height:18px;margin-top:2px}
+ .alert-bad{background:var(--bad-soft);color:var(--bad);border:1px solid #fecaca}
+ .alert-ok{background:var(--ok-soft);color:var(--ok);border:1px solid #bbf7d0}
+ .drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;min-height:260px;
+  border:2px dashed #d6d3d1;border-radius:var(--radius);background:var(--soft);padding:32px;cursor:pointer;transition:.15s}
+ .drop:hover,.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+ .drop .icon{width:52px;height:52px;border-radius:14px;background:var(--surface);display:grid;place-items:center;box-shadow:var(--shadow)}
+ .drop .icon svg{width:24px;height:24px;stroke:var(--accent)}
+ .drop strong{font-size:1rem} .drop span{color:var(--muted);font-size:.9rem}
+ .drop img{max-height:220px;max-width:100%;border-radius:12px;box-shadow:var(--shadow)}
+ .file-input{position:absolute;width:1px;height:1px;opacity:0}
+ .actions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:20px;flex-wrap:wrap}
+ .hint{color:var(--muted);font-size:.85rem}
+ .spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:r .7s linear infinite;display:none}
+ .busy .spin{display:inline-block}
+ @keyframes r{to{transform:rotate(360deg)}}
+ .grid2{display:grid;grid-template-columns:1.1fr 1fr;gap:24px;align-items:start}
+ .photo{width:100%;border-radius:12px;display:block;background:var(--soft)}
+ .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+ .chip{display:inline-flex;align-items:center;gap:6px;font-size:.8rem;font-weight:500;color:var(--muted);background:var(--soft);
+  border:1px solid var(--line);padding:4px 10px;border-radius:999px}
+ .chip.accent{color:var(--accent);background:var(--accent-soft);border-color:#e0e7ff}
+ .label{padding:12px 0;border-bottom:1px solid var(--soft)} .label:last-child{border-bottom:0}
+ .label-row{display:flex;justify-content:space-between;font-size:.95rem;margin-bottom:8px}
+ .label-row b{font-weight:600} .label-row span{color:var(--muted);font-variant-numeric:tabular-nums}
+ .track{height:6px;border-radius:99px;background:var(--soft);overflow:hidden}
+ .fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#6366f1,#a855f7)}
+ .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:20px}
+ .tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;text-decoration:none;
+  box-shadow:var(--shadow);transition:.15s;display:flex;flex-direction:column}
+ .tile:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(28,25,23,.10)}
+ .tile img{width:100%;aspect-ratio:4/3;object-fit:cover;background:var(--soft);display:block}
+ .tile-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px}
+ .tile-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .tile .chips{display:flex;flex-wrap:wrap;gap:6px}
+ .empty{text-align:center;padding:56px 24px;color:var(--muted)}
+ footer{max-width:1040px;margin:0 auto;padding:24px;color:var(--muted);font-size:.8rem;display:flex;justify-content:center;gap:8px;align-items:center}
+ .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 3px #dcfce7}
+ @media (max-width:760px){.grid2{grid-template-columns:1fr} h1{font-size:1.6rem} .top-in{padding:12px 16px} main{padding:28px 16px}}
 </style></head><body>
-<header><span class="brand">Analisis inteligente de imagenes</span>
-<a href="{{ url_for('index') }}">Subir imagen</a><a href="{{ url_for('history') }}">Historial</a></header>
+<div class="top"><div class="top-in">
+ <a class="brand" href="{{ url_for('index') }}"><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></span>Visión</a>
+ <nav class="tabs"><a href="{{ url_for('index') }}" class="{{ 'on' if request.endpoint in ('index', 'upload') else '' }}">Analizar</a><a href="{{ url_for('history') }}" class="{{ 'on' if request.endpoint in ('history', 'show') else '' }}">Historial</a></nav>
+</div></div>
 <main>{{ body|safe }}</main>
-<footer>Atendido por la replica <strong>{{ instance }}</strong> &middot; Amazon S3 + Amazon Rekognition + Amazon RDS</footer>
+<footer><span class="dot"></span><span>Atendido por la réplica <strong>{{ instance }}</strong> · Amazon S3 · Rekognition · RDS</span></footer>
 </body></html>"""
 
+ICON_ALERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>'
+ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>'
+
 UPLOAD = """
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-<div class="card">
- <h2>Subir una imagen</h2>
- <p class="muted">Formatos JPG o PNG, maximo {{ max_mb }} MB. Se analizara con Amazon Rekognition.</p>
- <form method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
-  <p><input type="file" name="image" accept=".jpg,.jpeg,.png,image/jpeg,image/png" required></p>
-  <button type="submit">Analizar imagen</button>
- </form>
-</div>"""
+<h1>Analiza una imagen</h1>
+<p class="lead">Amazon Rekognition detecta objetos, escenas y conceptos, con su nivel de confianza.</p>
+{% if error %}<div class="alert alert-bad">""" + ICON_ALERT + """<div>{{ error }}</div></div>{% endif %}
+<form class="card" id="f" method="post" action="{{ url_for('upload') }}" enctype="multipart/form-data">
+ <label class="drop" id="drop" for="file">
+  <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M20 16v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3"/></svg></span>
+  <strong id="drop-title">Arrastra una imagen aquí o haz clic para elegirla</strong>
+  <span id="drop-sub">JPG o PNG · máximo {{ max_mb }} MB</span>
+ </label>
+ <input class="file-input" id="file" type="file" name="image" accept=".jpg,.jpeg,.png,image/jpeg,image/png" required>
+ <div class="actions">
+  <span class="hint">La imagen se guarda en S3 y el resultado en la base de datos.</span>
+  <button class="btn btn-primary" id="go" type="submit" disabled><span class="spin"></span><span id="go-text">Analizar imagen</span></button>
+ </div>
+</form>
+<script>
+(function(){
+ var input=document.getElementById('file'), drop=document.getElementById('drop'), go=document.getElementById('go'),
+     title=document.getElementById('drop-title'), sub=document.getElementById('drop-sub'), max={{ max_mb }}*1024*1024;
+ function show(file){
+  if(!file){return;}
+  var mb=(file.size/1048576).toFixed(1);
+  title.textContent=file.name; sub.textContent=mb+' MB · haz clic para cambiarla';
+  go.disabled=file.size>max;
+  if(file.size>max){sub.textContent=mb+' MB · supera el máximo de {{ max_mb }} MB';}
+  var old=drop.querySelector('img'); if(old){old.remove();}
+  if(/^image\\/(jpeg|png)$/.test(file.type)){
+   var img=document.createElement('img'); img.alt=''; img.src=URL.createObjectURL(file);
+   drop.querySelector('.icon').style.display='none'; drop.insertBefore(img, title);
+  }
+ }
+ input.addEventListener('change', function(){ show(input.files[0]); });
+ ['dragenter','dragover'].forEach(function(e){ drop.addEventListener(e, function(ev){ ev.preventDefault(); drop.classList.add('over'); }); });
+ ['dragleave','drop'].forEach(function(e){ drop.addEventListener(e, function(ev){ ev.preventDefault(); drop.classList.remove('over'); }); });
+ drop.addEventListener('drop', function(ev){ if(ev.dataTransfer.files.length){ input.files=ev.dataTransfer.files; show(input.files[0]); } });
+ document.getElementById('f').addEventListener('submit', function(){ go.disabled=true; go.classList.add('busy'); document.getElementById('go-text').textContent='Analizando…'; });
+})();
+</script>"""
 
 RESULT = """
-{% if new %}<div class="ok">Imagen procesada correctamente.</div>{% endif %}
-<div class="card">
- <h2>{{ image.original_name }}</h2>
- <p class="muted">Procesada el {{ image.processed_at }} &middot; ID {{ image.id }}</p>
- <img class="preview" src="{{ image.url }}" alt="{{ image.original_name }}">
+{% if new %}<div class="alert alert-ok">""" + ICON_OK + """<div>Imagen procesada correctamente.</div></div>{% endif %}
+<div class="grid2">
+ <div class="card">
+  <img class="photo" src="{{ image.url }}" alt="{{ image.original_name }}">
+  <div class="meta">
+   <span class="chip accent">{{ image.original_name }}</span>
+   <span class="chip">{{ image.processed_at }}</span>
+  </div>
+ </div>
+ <div class="card">
+  <h2>Etiquetas detectadas</h2>
+  {% if labels %}
+  {% for name, conf in labels %}
+  <div class="label">
+   <div class="label-row"><b>{{ name }}</b><span>{{ '%.2f'|format(conf) }} %</span></div>
+   <div class="track"><div class="fill" style="width:{{ conf }}%"></div></div>
+  </div>
+  {% endfor %}
+  {% else %}<p class="hint">Rekognition no detectó etiquetas con confianza mayor o igual a {{ min_conf }} %.</p>{% endif %}
+  <div class="actions">
+   <a class="btn btn-ghost" href="{{ url_for('history') }}">Ver historial</a>
+   <a class="btn btn-primary" href="{{ url_for('index') }}">Analizar otra</a>
+  </div>
+ </div>
 </div>
-<div class="card">
- <h3>Etiquetas detectadas</h3>
- {% if labels %}
- <table><tr><th>Etiqueta</th><th>Confianza</th><th style="width:40%"></th></tr>
- {% for name, conf in labels %}
-  <tr><td>{{ name }}</td><td>{{ '%.2f'|format(conf) }} %</td>
-  <td><div class="bar"><span style="width:{{ conf }}%"></span></div></td></tr>
- {% endfor %}</table>
- {% else %}<p>Rekognition no detecto etiquetas con confianza mayor o igual a {{ min_conf }} %.</p>{% endif %}
-</div>"""
+<p class="hint" style="margin-top:16px">ID {{ image.id }}</p>"""
 
 HISTORY = """
-<div class="card">
- <h2>Historial de imagenes procesadas</h2>
- {% if rows %}
- <table><tr><th></th><th>Imagen</th><th>Etiquetas principales</th><th>Fecha</th></tr>
+<h1>Historial</h1>
+<p class="lead">Imágenes procesadas, de la más reciente a la más antigua.</p>
+{% if rows %}
+<div class="gallery">
  {% for r in rows %}
-  <tr><td><a href="{{ url_for('show', image_id=r.id) }}"><img class="thumb" src="{{ r.url }}" alt=""></a></td>
-  <td><a href="{{ url_for('show', image_id=r.id) }}">{{ r.original_name }}</a></td>
-  <td>{{ r.top or 'Sin etiquetas' }}</td><td>{{ r.processed_at }}</td></tr>
- {% endfor %}</table>
- {% else %}<p>Todavia no hay imagenes procesadas.</p>{% endif %}
-</div>"""
+ <a class="tile" href="{{ url_for('show', image_id=r.id) }}">
+  <img src="{{ r.url }}" alt="{{ r.original_name }}" loading="lazy">
+  <div class="tile-body">
+   <div class="tile-name">{{ r.original_name }}</div>
+   <div class="chips">{% if r.top %}{% for t in r.top.split(', ') %}<span class="chip">{{ t }}</span>{% endfor %}{% else %}<span class="chip">Sin etiquetas</span>{% endif %}</div>
+   <div class="hint">{{ r.processed_at }}</div>
+  </div>
+ </a>
+ {% endfor %}
+</div>
+{% else %}
+<div class="card empty">Todavía no hay imágenes procesadas.<div class="actions" style="justify-content:center"><a class="btn btn-primary" href="{{ url_for('index') }}">Analizar la primera</a></div></div>
+{% endif %}"""
 
 
 def page(title, body_template, status=200, **ctx):
@@ -286,7 +394,7 @@ def served_by(resp):
 @app.errorhandler(413)
 def too_large(_err):
     return page("Subir imagen", UPLOAD, status=413, max_mb=MAX_MB,
-                error="La imagen supera el tamano maximo de %d MB." % MAX_MB)
+                error="La imagen supera el tamaño máximo de %d MB." % MAX_MB)
 
 
 @app.get("/")
@@ -311,7 +419,7 @@ def upload():
         log.exception("Error de AWS al procesar %s", key)
         msg = "No se pudo analizar la imagen en AWS. Intenta de nuevo."
         if isinstance(exc, ClientError) and "InvalidImageFormat" in exc.response.get("Error", {}).get("Code", ""):
-            msg = "Rekognition no pudo leer la imagen. Verifica que no este danada."
+            msg = "Rekognition no pudo leer la imagen. Verifica que no esté dañada."
         return page("Subir imagen", UPLOAD, status=502, max_mb=MAX_MB, error=msg)
     except psycopg2.Error:
         log.exception("Error de base de datos al registrar %s", key)
