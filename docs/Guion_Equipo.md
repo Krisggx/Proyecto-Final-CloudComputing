@@ -101,7 +101,7 @@ Cada quien dice su línea:
 
 > Todo lo que hemos mostrado hasta ahora no lo creamos haciendo clic en la consola. Lo escribimos en una sola plantilla de AWS CloudFormation que crea los 39 recursos del sistema: la red con sus seis subredes, los cinco servidores, el balanceador, el bucket, la base de datos, el secreto y los permisos.
 >
-> Los servidores se configuran solos al encenderse: cada uno instala lo que le toca, escribe su configuración y arranca sus servicios. Eso tiene dos ventajas. La primera es que el sistema se puede recrear completo en unos veinte minutos, sin pasos manuales ni olvidos. La segunda es que, si perdemos un servidor, CloudFormation lo vuelve a crear igual que antes.
+> Los servidores se configuran solos al encenderse: cada uno instala lo que le toca, escribe su configuración y arranca sus servicios. Eso tiene dos ventajas. La primera es que el sistema se puede recrear completo en unos veinte minutos, sin pasos manuales ni olvidos. La segunda es que la configuración queda escrita: si perdemos un servidor, lanzamos uno igual desde la consola con la opción «Lanzar más como esta», que copia la imagen, la red, los permisos y el script de arranque.
 >
 > Elegimos CloudFormation en lugar de Terraform porque viene integrado en AWS y no requiere instalar nada: la plantilla se sube directamente desde la consola. Todo el código está en nuestro repositorio de GitHub, y la aplicación tiene diez pruebas automáticas.
 
@@ -137,7 +137,7 @@ Cada quien dice su línea:
 
 > Para cada componente tenemos documentado cómo volver a la normalidad.
 >
-> Si se cae una réplica de la aplicación, el sistema operativo la reinicia; y si se pierde el servidor completo, CloudFormation lo vuelve a crear. Con un nodo de HAProxy pasa lo mismo: primero se valida la configuración y se reinicia, y si hace falta, se recrea.
+> Si se cae una réplica de la aplicación, el sistema operativo la reinicia; y si se pierde el servidor completo, lanzamos uno igual con la opción «Lanzar más como esta» y actualizamos su dirección en HAProxy. Con un nodo de HAProxy es parecido: primero se valida la configuración y se reinicia; si se pierde, se lanza un reemplazo y se registra en el balanceador de Amazon. Todo esto está paso a paso en la guía de recuperación.
 >
 > La base de datos tiene respaldos automáticos de siete días, así que podemos restaurarla al minuto exacto que necesitemos, y además tomamos un respaldo manual antes de esta presentación. Por otro lado, el bastión hace todos los días una copia lógica de los datos y la guarda en S3. Las imágenes también están protegidas, porque el bucket guarda versiones anteriores de cada archivo.
 >

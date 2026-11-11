@@ -139,9 +139,9 @@ Luego abre http://localhost:8404/stats en tu navegador.
 
 | Falla | Cómo recuperarse |
 | --- | --- |
-| Réplica de la aplicación | `sudo systemctl restart imgapp`; ver logs con `journalctl -u imgapp -n 50`. Si la instancia se perdió: **Update stack** con la misma plantilla y CloudFormation la recrea |
+| Réplica de la aplicación | `sudo systemctl restart imgapp`; ver logs con `journalctl -u imgapp -n 50`. Si la instancia se terminó: **Lanzar más como esta** desde la otra réplica y actualizar su IP en `haproxy.cfg` (ver `docs/Guia_Recuperacion.pdf`) |
 | Nodo HAProxy | `sudo haproxy -c -f /etc/haproxy/haproxy.cfg` y `sudo systemctl restart haproxy`; ver logs con `journalctl -u haproxy` |
-| ALB | Servicio administrado multizona. Si se borra por error, **Update stack** lo recrea |
+| ALB | Servicio administrado multizona. Si se borra por error, crear otro ALB con el grupo de destino `imgproj-tg-haproxy` (la URL cambia) |
 | RDS | **RDS → Databases → imgproj-db-… → Actions → Restore to point in time**; luego cambiar `DB_HOST` en `/etc/imgapp.env` de app-a y app-b y reiniciar `imgapp` |
 | Datos lógicos | `imgproj-backup` genera un respaldo; para restaurarlo: `aws s3 cp s3://BUCKET/backups/ARCHIVO.sql.gz - \| gunzip \| imgproj-psql` |
 | Imagen borrada en S3 | El bucket tiene versionado: **S3 → objeto → Versions** para recuperar la versión anterior |
