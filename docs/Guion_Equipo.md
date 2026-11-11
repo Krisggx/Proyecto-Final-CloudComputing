@@ -1,276 +1,204 @@
-# Guion del proyecto final: Sistema web para análisis inteligente de imágenes en AWS
+# Guion de la presentación final
 
-**Para:** Cristina, Isidro, Jorge, Edwin y Kris
-**Presentación:** miércoles 11 de noviembre de 2026, 7:00 p. m. Vestimenta formal.
+**Sistema web para análisis inteligente de imágenes en AWS**
+Cloud Computing, Universidad del Valle de Guatemala, Campus Altiplano. Miércoles 11 de noviembre de 2026, 7:00 p. m. Vestimenta formal.
 
-Este guion explica qué se hizo, cómo se hizo y por qué se hizo así, componente por componente. Cada quien tiene su parte, pero **el catedrático puede preguntarle a cualquiera sobre cualquier capa**, así que lean todo, no solo lo suyo.
+Este es el texto que dice cada uno, en el orden de las diapositivas. No hace falta memorizarlo palabra por palabra: la idea es que lo lean varias veces, lo digan con sus propias palabras y entiendan el porqué de cada decisión. La presentación dura unos 18 minutos, incluida la demostración.
 
-## Enlaces
-
-| Qué | Dónde |
-| --- | --- |
-| Sistema en vivo | http://imgproj-alb-399228811.us-east-1.elb.amazonaws.com |
-| Código, informe y presentación | https://github.com/Krisggx/Proyecto-Final-CloudComputing |
-| Informe final (APA 7) | `docs/Informe_Final_Cloud_Computing.pdf` en el repositorio |
-| Guía técnica | `DESPLIEGUE.md` en el repositorio |
-
-Si Chrome bloquea el sitio por ser `http`, ábranlo en Edge, en el celular o en una ventana de incógnito.
+El catedrático puede preguntarle a cualquiera sobre cualquier parte del sistema. Por eso, aunque cada quien tiene su turno, conviene que todos lean el guion completo. Al final hay respuestas preparadas para las preguntas más probables.
 
 ---
 
-## 1. El proyecto en 30 segundos
+## Diapositiva 1: Portada (Cristina)
 
-Construimos una página web donde subes una foto. La foto se guarda en **Amazon S3**, **Amazon Rekognition** dice qué contiene (por ejemplo "Sphere 100 %, Purple 99 %") y el resultado queda guardado en una base de datos **Amazon RDS (PostgreSQL)**. Hay un historial de todas las imágenes, que también se puede borrar.
+> Buenas noches, ingeniero. Somos el equipo del proyecto final de Cloud Computing y vamos a presentar nuestro sistema web para análisis inteligente de imágenes en AWS.
+>
+> En pocas palabras, construimos una página web donde una persona sube una fotografía y el sistema le dice qué contiene, usando inteligencia artificial de Amazon. Lo más importante para nosotros no fue solo que funcionara, sino que siguiera funcionando aunque uno de sus servidores fallara. Eso es lo que vamos a demostrar en vivo.
 
-Lo importante del curso es la **alta disponibilidad**: hay **dos copias de la aplicación** en dos zonas distintas de AWS, con **dos niveles de balanceo** (un ALB y dos HAProxy). Si apagamos un servidor, el sitio sigue funcionando. Lo probamos en vivo y lo medimos.
+## Diapositiva 2: Equipo (Cristina, y cada integrante dice su parte)
 
-Toda la infraestructura (39 recursos de AWS) se crea con **una sola plantilla de CloudFormation**. Eso es *Infraestructura como Código*, uno de los puntos extra.
+> Cada integrante administró un componente del sistema. Les presento al equipo.
 
-## 2. Cómo viaja una imagen (todos deben saber explicarlo)
+Cada quien dice su línea:
 
-1. El usuario entra por el **Application Load Balancer (ALB)**, que es público y está en 2 zonas.
-2. El ALB manda la solicitud a uno de los dos **HAProxy** (uno en cada zona).
-3. El HAProxy la manda a una de las dos **réplicas de la aplicación** (`app-a` o `app-b`).
-4. La aplicación **valida** el archivo: tiene que ser JPG o PNG de verdad (se revisan los primeros bytes, no solo el nombre) y pesar 5 MB o menos.
-5. La aplicación **guarda** la imagen en S3 con un nombre único (UUID).
-6. La aplicación le pide a **Rekognition** (operación `DetectLabels`) las etiquetas con confianza de 70 % o más.
-7. La aplicación **registra** en RDS la imagen, las etiquetas, la confianza y la fecha.
-8. La aplicación **muestra** el resultado. La imagen se ve con un enlace temporal de 15 minutos, así el bucket nunca es público.
+> **Cristina:** Yo me encargué de la red, los grupos de seguridad y el balanceador de carga de Amazon.
+>
+> **Isidro:** Yo configuré los dos balanceadores HAProxy y las comprobaciones de estado.
+>
+> **Jorge:** Yo desarrollé la aplicación web y su integración con Amazon S3 y Amazon Rekognition.
+>
+> **Edwin:** Yo administré la base de datos en Amazon RDS, los respaldos y la guía de recuperación.
+>
+> **Kris:** Yo hice la plantilla de CloudFormation que crea toda la infraestructura, el servidor bastión, las pruebas de continuidad y la documentación.
 
-Los **5 servidores** que pide el curso son: `haproxy-a`, `haproxy-b`, `app-a`, `app-b` y `bastion`. RDS no cuenta como servidor porque es un servicio administrado.
+## Diapositiva 3: Problema y objetivo (Cristina)
 
-## 3. Orden de la presentación
+> El problema del que partimos tiene dos partes. La primera es que clasificar imágenes a mano es lento, es subjetivo y no escala: si una organización tiene miles de fotos, nadie puede etiquetarlas una por una. La segunda es que, si una aplicación vive en un solo servidor, cuando ese servidor falla, la aplicación deja de responder.
+>
+> Nuestro objetivo fue construir un sistema en la nube que resuelva las dos cosas: que suba imágenes, las analice automáticamente con Amazon Rekognition, guarde el resultado en una base de datos y que siga disponible aunque falle una de sus réplicas.
 
-| # | Diapositiva | Presenta | Tiempo |
-| --- | --- | --- | --- |
-| 1 | Portada | Cristina | 20 s |
-| 2 | Equipo | Cristina (cada quien dice su nombre y su componente) | 40 s |
-| 3 | Problema y objetivo | Cristina | 1 min |
-| 4 | Arquitectura | Cristina e Isidro | 2 min |
-| 5 | Flujo de una imagen | Jorge | 1 min |
-| 6 | La aplicación | Jorge | 1 min |
-| 7 | Tecnologías | Jorge | 1 min |
-| 8 | Alta disponibilidad | Isidro | 1,5 min |
-| 9 | Seguridad | Cristina | 1 min |
-| 10 | Infraestructura como código | Kris | 1 min |
-| 11 | Demostración en vivo | Isidro, Jorge y Kris | 5 min |
-| 12 | Resultados | Edwin | 1,5 min |
-| 13 | Recuperación y respaldos | Edwin | 1,5 min |
-| 14 | Conclusiones | Kris | 1 min |
-| 15 | Preguntas | Todos | — |
+## Diapositiva 4: Arquitectura (Cristina e Isidro)
 
----
+> **Cristina:** Esta es la arquitectura completa. Si la leemos de arriba hacia abajo, el usuario entra por un Application Load Balancer, que es el único punto público del sistema y está repartido en dos zonas de disponibilidad de AWS.
+>
+> Toda la red está dividida en capas. Los balanceadores HAProxy están en subredes públicas, pero las réplicas de la aplicación y la base de datos están en subredes privadas, es decir, no se pueden alcanzar desde internet. Además, cada capa solo acepta tráfico de la capa anterior: el balanceador solo habla con HAProxy, HAProxy solo habla con la aplicación y la aplicación es la única que puede conectarse a la base de datos.
+>
+> **Isidro:** Debajo del balanceador de Amazon están los dos HAProxy, uno en cada zona. Cada HAProxy reparte las solicitudes entre las dos réplicas de la aplicación; por eso las flechas se cruzan. Así no existe ningún servidor que, si se cae, tumbe el sistema completo.
+>
+> Abajo están los servicios administrados que usa la aplicación: S3 para guardar las imágenes, Rekognition para analizarlas, RDS como base de datos y Secrets Manager para guardar la contraseña de la base. A la izquierda está el bastión, que es el quinto servidor y lo usamos solo para administrar y hacer respaldos.
 
-## 4. Parte de cada integrante
+## Diapositiva 5: Flujo de una imagen (Jorge)
 
-### Cristina Marie Jimenez Garcia (20680): red, grupos de seguridad y ALB
+> Ahora les explico qué pasa cuando alguien sube una imagen, en cinco pasos.
+>
+> Primero, la aplicación valida el archivo. No basta con que se llame ".jpg": revisamos los primeros bytes del archivo, que son como su firma, para confirmar que de verdad es una imagen JPG o PNG. También rechazamos todo lo que pese más de 5 megabytes.
+>
+> Segundo, la imagen se guarda en Amazon S3 con un nombre único, generado al azar, para que nadie pueda sobrescribir la imagen de otra persona.
+>
+> Tercero, le pedimos a Amazon Rekognition que la analice. Rekognition nos devuelve etiquetas como "naturaleza" o "cielo", cada una con un porcentaje de confianza, y nos quedamos solo con las que tienen 70 % o más.
+>
+> Cuarto, registramos en la base de datos el nombre de la imagen, sus etiquetas, la confianza y la fecha.
+>
+> Y quinto, mostramos el resultado al usuario, que también queda guardado en el historial.
 
-**Qué se hizo**
+## Diapositiva 6: La aplicación (Jorge)
 
-- Una red privada (VPC `10.0.0.0/16`) con **6 subredes** en 2 zonas: 2 públicas (HAProxy y bastión), 2 privadas para la aplicación y 2 privadas para la base de datos.
-- Un **NAT Gateway**, para que las réplicas privadas descarguen paquetes sin ser accesibles desde internet.
-- Un **VPC endpoint de S3**, para que el tráfico hacia S3 no salga a internet.
-- **5 grupos de seguridad encadenados**: ALB → HAProxy → App → RDS. Cada capa solo acepta tráfico de la capa anterior.
-- El **Application Load Balancer** público, con un *target group* que contiene a los 2 HAProxy y revisa `/lb-health` cada 5 segundos.
+> Así se ve la aplicación. A la izquierda está la página de resultado: la imagen y, al lado, cada etiqueta con una barra que representa su nivel de confianza. Un detalle de seguridad: la imagen se muestra con un enlace temporal que dura 15 minutos, así que el bucket de S3 nunca es público.
+>
+> A la derecha está el historial, en forma de galería, con todas las imágenes procesadas de la más reciente a la más antigua. Agregamos un botón para borrar el historial. Antes de borrar, el sistema pide confirmación, y lo que se elimina son los registros de la base de datos. Las imágenes se quedan en S3 como respaldo, porque decidimos que la aplicación no tenga permiso de borrar archivos. Eso es aplicar el principio de privilegio mínimo.
 
-**Cómo se hizo:** todo está declarado en la plantilla `infra/imgproj-stack.yaml`, en los recursos `VPC`, `*Subnet*`, `NatGateway`, `*SG`, `LoadBalancer` y `HAProxyTargetGroup`.
+## Diapositiva 7: Tecnologías (Jorge)
 
-**Por qué se hizo así**
+> Para elegir las tecnologías seguimos una regla: usar servicios administrados de AWS donde se puede y código abierto donde aporta.
+>
+> La aplicación está hecha en Python con Flask, que es un framework sencillo y suficiente para nuestras cuatro páginas, y la servimos con Gunicorn. Para hablar con AWS usamos Boto3, que es el kit oficial de Amazon para Python.
+>
+> Para la base de datos elegimos RDS con PostgreSQL en lugar de DynamoDB, por tres razones: el historial se consulta ordenado por fecha, y eso es natural en SQL; RDS nos da respaldos y restauración casi sin configuración; y nos permite demostrar claramente que la base de datos está en una red privada. La contraseña la guarda Secrets Manager, y toda la infraestructura se crea con CloudFormation, como les va a explicar Kris.
 
-- Usamos **subredes privadas** porque la aplicación y la base de datos no deben poder alcanzarse desde internet. Es uno de los controles de seguridad que pide el curso.
-- **Encadenamos los grupos de seguridad** por privilegio mínimo: el puerto 5432 de la base solo lo puede usar la aplicación (y el bastión, para administrarla).
-- Usamos **dos zonas** porque, si se cae toda una zona de AWS, la otra sigue atendiendo.
-- Pusimos el **ALB delante de HAProxy** porque da una sola dirección pública en 2 zonas y retira solo al HAProxy que falle.
+## Diapositiva 8: Alta disponibilidad (Isidro)
 
-**Qué decir:** "La red está dividida en capas: lo público es solo el balanceador. La aplicación y la base de datos están en subredes privadas, y cada capa solo acepta tráfico de la anterior."
+> Esta es la idea central del proyecto: tenemos dos niveles de balanceo, y cada uno vigila al siguiente.
+>
+> En el primer nivel, el balanceador de Amazon revisa cada cinco segundos que los dos HAProxy estén vivos. Si uno falla dos veces seguidas, lo saca de circulación y manda todo el tráfico al otro.
+>
+> En el segundo nivel, cada HAProxy revisa cada cinco segundos que las réplicas de la aplicación respondan, y si una falla tres veces la marca como caída. Pero lo más importante es que configuramos reintentos: si HAProxy intenta conectarse a una réplica y no puede, reintenta en la otra. Por eso, cuando apagamos una réplica, el usuario no ve ni un solo error.
+>
+> Por último, si la aplicación se cae, el sistema operativo la vuelve a levantar sola, y cuando regresa, los balanceadores la reincorporan automáticamente. Incluso las actualizaciones las hacemos con una recarga suave, que no corta a nadie que esté usando el sistema.
 
-**Preguntas que te pueden hacer**
+## Diapositiva 9: Seguridad (Cristina)
 
-- *¿Por qué ALB y HAProxy, si los dos balancean?* HAProxy es obligatorio en el curso y balancea entre las réplicas con comprobaciones y reintentos. El ALB da la entrada pública en 2 zonas y protege contra la caída de un HAProxy. Así ninguna capa depende de un solo servidor.
-- *¿Qué pasa si se cae una zona?* El ALB deja de mandar tráfico al HAProxy de esa zona y el otro HAProxy atiende con la réplica que queda.
-- *¿Cuál es un punto débil de la red?* Hay un solo NAT Gateway. Si falla, las réplicas no pueden descargar paquetes, pero siguen atendiendo. Está en las recomendaciones.
+> Aplicamos cuatro controles de seguridad, uno por cada cosa que pedían los lineamientos.
+>
+> El primero es privilegio mínimo: los servidores tienen un rol de Amazon que solo les permite lo indispensable, que es guardar y leer imágenes, analizarlas con Rekognition y leer un único secreto.
+>
+> El segundo es que no hay contraseñas en el código. La contraseña de la base de datos la generó automáticamente Secrets Manager al crear el sistema; ninguno de nosotros la escribió ni la conoce, y por eso tampoco aparece en GitHub.
+>
+> El tercero es que la base de datos es privada: no tiene dirección pública y solo la aplicación puede conectarse a ella.
+>
+> Y el cuarto es la validación de archivos que explicó Jorge: tipo real, tamaño máximo y nombres únicos. Además, para administrar los servidores no usamos llaves de SSH, sino AWS Systems Manager, que no requiere abrir puertos adicionales.
 
-### Isidro Alexander Chuj Quijivix (231621): HAProxy y comprobaciones de estado
+## Diapositiva 10: Infraestructura como código (Kris)
 
-**Qué se hizo**
+> Todo lo que hemos mostrado hasta ahora no lo creamos haciendo clic en la consola. Lo escribimos en una sola plantilla de AWS CloudFormation que crea los 39 recursos del sistema: la red con sus seis subredes, los cinco servidores, el balanceador, el bucket, la base de datos, el secreto y los permisos.
+>
+> Los servidores se configuran solos al encenderse: cada uno instala lo que le toca, escribe su configuración y arranca sus servicios. Eso tiene dos ventajas. La primera es que el sistema se puede recrear completo en unos veinte minutos, sin pasos manuales ni olvidos. La segunda es que, si perdemos un servidor, CloudFormation lo vuelve a crear igual que antes.
+>
+> Elegimos CloudFormation en lugar de Terraform porque viene integrado en AWS y no requiere instalar nada: la plantilla se sube directamente desde la consola. Todo el código está en nuestro repositorio de GitHub, y la aplicación tiene diez pruebas automáticas.
 
-- **Dos nodos HAProxy**, uno por zona, con la misma configuración (`haproxy/haproxy.cfg`).
-- Cada nodo reparte las solicitudes entre `app-a` y `app-b` por turnos (*round robin*).
-- Cada nodo revisa `/health` en cada réplica cada 5 segundos y la marca DOWN después de 3 fallos.
-- `retries 2` y `option redispatch`: si una conexión falla, HAProxy la reintenta en la otra réplica.
-- `monitor-uri /lb-health`, que es lo que revisa el ALB para saber si el HAProxy está vivo.
-- Una cabecera `X-LB-Node` que dice qué HAProxy respondió, y una página de estadísticas en el puerto 8404, accesible solo desde el bastión.
+## Diapositiva 11: Demostración en vivo (Isidro, Jorge y Kris)
 
-**Cómo se hizo:** CloudFormation instala HAProxy en cada servidor al arrancar, escribe la configuración con las IP privadas de las réplicas y la valida con `haproxy -c` antes de iniciar el servicio.
+> **Isidro:** Ahora vamos a demostrar todo esto en vivo, sobre el sistema real que está corriendo en AWS en este momento.
 
-**Por qué se hizo así**
+> **Jorge:** Primero subo una imagen… Aquí está el resultado: estas son las etiquetas que encontró Rekognition, con su porcentaje de confianza. Si voy a la consola de S3, aquí está la imagen guardada con su nombre único. Y en el historial aparece de primera.
+>
+> Ahora intento subir un documento PDF al que le cambié la extensión a ".jpg"… y el sistema lo rechaza, porque revisa el contenido real del archivo. Lo mismo pasa con esta imagen de más de 5 megas.
 
-- Usamos **dos nodos** porque un solo HAProxy sería un punto único de falla.
-- Usamos **reintentos con redispatch** porque, gracias a ellos, apagar una réplica no produjo **ni un solo error** (prueba P-08).
-- La **cabecera `X-LB-Node`** sirve como evidencia del balanceo durante la demo.
+> **Kris:** En esta terminal estoy consultando el sistema cada segundo. En cada línea ven el código de respuesta, que es 200 cuando todo está bien, cuál de los dos HAProxy respondió y cuál de las dos réplicas atendió. Como ven, se van alternando.
 
-**Qué decir:** "Hay dos niveles de balanceo. El ALB vigila a los HAProxy y los HAProxy vigilan a las réplicas. Cuando una réplica cae, HAProxy reintenta en la otra y el usuario no ve el error."
+> **Isidro:** Ahora vamos a simular que falla una réplica. Kris, apaga la aplicación en app-a, por favor… Fíjense en la terminal: todas las respuestas siguen en 200, pero ahora solo responde app-b. HAProxy detectó la caída y reintentó en la otra réplica, así que el usuario no vio ningún error. Kris la vuelve a encender… y en unos segundos app-a regresa sola.
+>
+> Ahora hacemos lo mismo con un balanceador, pero como se haría un mantenimiento real: primero le decimos al balanceador de Amazon que deje de enviarle tráfico a haproxy-a y después lo apagamos. El sitio sigue respondiendo por haproxy-b. Al final lo volvemos a registrar.
 
-**En la demo:** explicas la prueba de apagar `app-a` mientras Kris ejecuta el comando.
+> **Jorge:** Por último, presiono "Borrar historial"… El sistema me pide confirmación, acepto, y el historial queda vacío. Vuelvo a analizar una imagen para que vean que todo sigue funcionando normalmente.
 
-**Preguntas que te pueden hacer**
+## Diapositiva 12: Resultados (Edwin)
 
-- *¿Por qué al apagar un HAProxy sí hubo 5 errores 502?* El ALB tarda unos 9 segundos (2 comprobaciones de 5 s) en notar que el HAProxy cayó. Mientras tanto le sigue mandando algunas solicitudes. La forma correcta de hacer mantenimiento es quitarlo primero del target group (*Deregister*). Así lo probamos y hubo 0 errores de 66.
-- *¿Qué es round robin?* Repartir las solicitudes por turnos: una a `app-a`, otra a `app-b`, y así.
-- *¿Cada cuánto revisa HAProxy?* Cada 5 segundos; marca DOWN con 3 fallos seguidos y vuelve a UP con 2 éxitos.
+> Hicimos catorce pruebas sobre el sistema real en AWS y las catorce cumplieron. Les quiero resaltar tres números.
+>
+> El primero es cero: cero errores cuando apagamos una réplica de la aplicación, porque HAProxy reintentó en la otra.
+>
+> El segundo es nueve segundos, que es lo que tarda el balanceador de Amazon en detectar que un HAProxy se apagó de golpe. En esos nueve segundos hubo cinco errores de 41 solicitudes. Por eso, cuando hicimos el retiro ordenado, avisándole al balanceador antes de apagar, hubo cero errores de 66. Esto nos enseñó que el mantenimiento se debe hacer de forma ordenada.
+>
+> Y el tercero es cero de 133: cuando actualizamos la aplicación con recarga suave, una réplica a la vez, no hubo ningún error. La primera vez la habíamos actualizado reiniciando el servicio y hubo un error de 196, así que cambiamos el procedimiento.
+>
+> También cumplieron las pruebas de etiquetas, de validación de archivos, del historial y su borrado, de la consulta a la base de datos, de que la base no es pública y de que el código no tiene secretos. Todas tienen su captura en el informe.
 
-### Jorge José Adrián Monterroso Flores (18610): aplicación, S3 y Rekognition
+## Diapositiva 13: Recuperación y respaldos (Edwin)
 
-**Qué se hizo**
+> Para cada componente tenemos documentado cómo volver a la normalidad.
+>
+> Si se cae una réplica de la aplicación, el sistema operativo la reinicia; y si se pierde el servidor completo, CloudFormation lo vuelve a crear. Con un nodo de HAProxy pasa lo mismo: primero se valida la configuración y se reinicia, y si hace falta, se recrea.
+>
+> La base de datos tiene respaldos automáticos de siete días, así que podemos restaurarla al minuto exacto que necesitemos, y además tomamos un respaldo manual antes de esta presentación. Por otro lado, el bastión hace todos los días una copia lógica de los datos y la guarda en S3. Las imágenes también están protegidas, porque el bucket guarda versiones anteriores de cada archivo.
+>
+> Y las actualizaciones de la aplicación se hacen una réplica a la vez, con recarga suave, que ya vimos que no produce errores.
 
-- La aplicación web en **Python con Flask**, servida con **Gunicorn** (3 trabajadores) como servicio de Linux (systemd).
-- **Validación de archivos en el servidor**: extensión, firma real del archivo (JPG o PNG) y máximo 5 MB.
-- **Integración con S3**, para guardar con nombre UUID y mostrar con enlaces temporales de 15 minutos.
-- **Integración con Rekognition** (`DetectLabels`, máximo 10 etiquetas, confianza de 70 % o más).
-- Las páginas de **carga** (con zona para arrastrar y vista previa), **resultado** (con barras de confianza) e **historial** (en galería).
-- El botón **"Borrar historial"**, que pide confirmación y borra los registros de la base. Las imágenes quedan en S3 como respaldo.
-- **10 pruebas automáticas** (`tests/test_app.py`).
+## Diapositiva 14: Conclusiones (Kris)
 
-**Cómo se hizo:** el código está en `app/app.py`. La aplicación no tiene ninguna contraseña escrita: usa el **rol de IAM** de la instancia para S3 y Rekognition, y lee la contraseña de la base desde **Secrets Manager**.
+> Para cerrar, revisamos nuestros objetivos. Construimos una aplicación web que analiza imágenes con Rekognition y conserva un historial consultable y que se puede borrar. Integramos S3, Rekognition y RDS en un solo flujo automático. Eliminamos los puntos únicos de falla en la capa de cómputo y lo demostramos con mediciones reales. Aplicamos los controles de seguridad que pedían los lineamientos. Y dejamos documentado cómo recuperar cada componente.
+>
+> También sabemos qué mejoraríamos. La base de datos y el NAT Gateway son hoy los componentes con menos redundancia, así que lo primero sería activar Multi-AZ en RDS y agregar un segundo NAT Gateway. Después agregaríamos escalado automático, HTTPS con un certificado y usuarios con inicio de sesión.
 
-**Por qué se hizo así**
+## Diapositiva 15: Preguntas (todos)
 
-- Usamos **Flask** porque es simple y suficiente para 4 páginas, y **Boto3** porque es el SDK oficial de AWS para Python.
-- **Validamos en el servidor** porque la validación del navegador se puede saltar. Revisar los primeros bytes evita que un PDF renombrado a `.jpg` pase (prueba P-05).
-- Usamos **nombres UUID** para que nadie pueda sobrescribir imágenes ni manipular rutas.
-- Usamos **enlaces temporales** para que el bucket nunca sea público.
-- El **borrado no elimina las imágenes de S3** porque el rol no tiene permiso de borrado. Es privilegio mínimo, y además sirve de respaldo.
-
-**Qué decir:** "La aplicación es la que une todo: valida, guarda en S3, consulta a Rekognition, registra en RDS y muestra el resultado. No tiene credenciales en el código."
-
-**En la demo:** subes una imagen y muestras las etiquetas y el historial. Después intentas subir el PDF renombrado y la imagen de más de 5 MB. Al final borras el historial y vuelves a analizar una imagen.
-
-**Preguntas que te pueden hacer**
-
-- *¿Cómo sabe la aplicación que una imagen es JPG de verdad?* Revisa la firma de los primeros bytes: JPG empieza con `FF D8 FF` y PNG con `89 50 4E 47`.
-- *¿Por qué 70 % de confianza?* Para mostrar solo etiquetas confiables. El valor se puede cambiar con una variable de entorno.
-- *¿Cómo se conecta a la base sin contraseña en el código?* Al iniciar, le pide el secreto a Secrets Manager usando el rol de la instancia.
-- *¿Qué hace exactamente "Borrar historial"?* Ejecuta `DELETE FROM images`; las etiquetas se borran en cascada. Lo probamos en el sitio real: se borraron 14 registros desde `app-a` y 2 desde `app-b`.
-
-### Edwin Manuel Valenzuela Chaj (231715): RDS, respaldos y recuperación
-
-**Qué se hizo**
-
-- Una base **Amazon RDS for PostgreSQL** (versión 18.3, `db.t3.micro`) en subredes privadas, **sin acceso público** y con almacenamiento **cifrado**.
-- Una **contraseña generada automáticamente** por Secrets Manager. Nadie del equipo la conoce.
-- Un esquema de dos tablas: `images` (id, nombre, clave en S3, fecha) y `labels` (nombre, confianza), relacionadas con borrado en cascada.
-- **Respaldos automáticos** de 7 días, con restauración a cualquier punto en el tiempo, y un **snapshot manual** antes de la demo.
-- **Respaldo lógico diario** con `pg_dump` desde el bastión hacia S3 (`backups/`).
-- La **guía de recuperación** de cada componente: sección "Guía de recuperación" del informe y `DESPLIEGUE.md`.
-
-**Por qué se hizo así**
-
-- Elegimos **RDS en lugar de DynamoDB** porque el historial se consulta ordenado por fecha, y eso es natural en SQL. Además, los snapshots facilitan demostrar respaldo y restauración, y la subred privada demuestra el acceso privado a la base.
-- Usamos **Secrets Manager** para que la contraseña nunca aparezca en el código, en el informe ni en GitHub.
-- Hay **dos tipos de respaldo** porque los de RDS recuperan toda la base y el `pg_dump` permite revisar o mover los datos.
-
-**Qué decir:** "La base de datos es privada: desde internet no se puede ni conectar (prueba P-11). Tenemos respaldos automáticos, un snapshot manual y un respaldo lógico diario, y cada componente tiene su procedimiento de recuperación."
-
-**Preguntas que te pueden hacer**
-
-- *¿Qué pasa si se cae la base?* Las dos réplicas responden 503 en `/health` y no se pueden subir imágenes. Se recupera reiniciando o restaurando a un punto en el tiempo. Es el componente con menos redundancia; por eso la primera recomendación es activar **Multi-AZ**.
-- *¿Cómo se restaura?* En la consola de RDS: *Restore to point in time*. Luego se cambia `DB_HOST` en las réplicas y se recarga el servicio.
-- *¿Dónde está la contraseña?* En Secrets Manager. La aplicación y el bastión la leen con su rol; ninguna persona la escribió.
-- *¿Cómo demuestran que la base no es pública?* El endpoint resuelve a una IP privada (10.0.21.108) y una conexión desde internet al puerto 5432 no responde.
-
-### Kris Gregorio Garcia Xep (23259): bastión, CloudFormation, pruebas y documentación
-
-**Qué se hizo**
-
-- La **plantilla de CloudFormation** que crea los **39 recursos**: red, 5 servidores, ALB, S3, RDS, secreto y rol de IAM.
-- Los servidores **se configuran solos** al arrancar (*user data*): instalan HAProxy o la aplicación, escriben la configuración y levantan los servicios.
-- El **bastión**, con comandos listos: `imgproj-psql` para consultar la base, `imgproj-backup` para el respaldo y `imgproj-continuidad` para la prueba de continuidad.
-- **Administración sin llaves SSH**: todo se hace con **Systems Manager** desde CloudShell.
-- Las **pruebas de continuidad**: un registro de respuestas del ALB cada medio segundo mientras se apagan servidores.
-- Las **actualizaciones escalonadas** de la aplicación, una réplica a la vez. Con reinicio hubo 1 error de 196 solicitudes; con **recarga suave** (`systemctl reload`, señal HUP) hubo **0 errores de 133**.
-- El informe en formato APA 7, la presentación y el repositorio de GitHub.
-
-**Por qué se hizo así**
-
-- Usamos **Infraestructura como Código** porque todo el sistema se puede recrear en unos 20 minutos con un archivo, sin pasos manuales ni olvidos. Es un punto extra del curso.
-- Elegimos **CloudFormation en lugar de Terraform** porque viene integrado en AWS, no requiere instalar nada y la plantilla se sube desde la consola.
-- Usamos **Systems Manager en lugar de SSH** porque no hay que guardar llaves privadas ni abrir puertos extra, y es más seguro.
-- Usamos la **recarga suave** porque Gunicorn arranca trabajadores con el código nuevo y deja terminar las solicitudes en curso, así que el usuario no nota la actualización.
-
-**Qué decir:** "Toda la infraestructura está en una plantilla. Si se pierde un servidor, *Update stack* lo recrea. Además medimos todo: cada prueba tiene su registro y su captura."
-
-**En la demo:** ejecutas los comandos en CloudShell (sección 5).
-
-**Preguntas que te pueden hacer**
-
-- *¿Qué es user data?* Un script que EC2 ejecuta una sola vez, la primera vez que arranca la instancia. Ahí se instala y configura todo.
-- *¿Cómo actualizaron la aplicación sin apagar el sitio?* Una réplica a la vez. Mientras una se recarga, la otra atiende, y la recarga suave no corta las conexiones.
-- *¿Para qué sirve el bastión si usan Systems Manager?* Para administrar la base (consultas y respaldos con `pg_dump`) desde dentro de la red, porque RDS no es accesible desde fuera.
+> **Cristina:** Muchas gracias por su atención. Quedamos atentos a sus preguntas.
 
 ---
 
-## 5. Guion de la demostración (5 minutos)
+## Respuestas preparadas para las preguntas más probables
 
-**Antes de empezar, dejar abiertas estas pestañas:**
+Respondan con calma y con sus palabras. Si la pregunta es sobre la parte de otro, pueden contestar lo general y pedirle al compañero que complemente.
 
+**¿Por qué usaron un balanceador de Amazon y además HAProxy, si los dos balancean?** (Isidro)
+> HAProxy era obligatorio en el proyecto, y es el que reparte entre las réplicas, con comprobaciones y reintentos. Pero si solo tuviéramos HAProxy, ese HAProxy sería un punto único de falla. Por eso pusimos dos, uno en cada zona, y delante el balanceador de Amazon, que nos da una sola dirección pública y saca de circulación al HAProxy que falle.
 
-- El sitio.
-- La consola de S3, en el bucket `imgproj-imagesbucket-…`, carpeta `uploads/`.
-- EC2 → Grupos de destino → `imgproj-tg-haproxy` → Destinos.
-- CloudShell.
+**¿Qué pasa si se cae toda una zona de AWS?** (Cristina)
+> El balanceador deja de enviar tráfico al HAProxy de esa zona, y el HAProxy de la otra zona sigue atendiendo con la réplica que le queda. La base de datos hoy está en una sola zona; por eso nuestra primera recomendación es activar Multi-AZ.
 
-1. **Jorge:** sube una imagen, muestra las etiquetas y su confianza, y abre el historial.
-2. **Jorge:** muestra que la imagen está en S3.
-3. **Jorge:** intenta subir el PDF renombrado a `.jpg` (error de tipo) y la imagen grande (error de tamaño).
-4. **Kris** ejecuta en CloudShell la prueba de continuidad, que pide la página cada segundo y muestra qué HAProxy y qué réplica respondió:
+**¿Por qué hubo errores al apagar un HAProxy y no al apagar una réplica?** (Isidro)
+> Porque HAProxy reintenta en la otra réplica cuando una conexión falla, pero el balanceador de Amazon no reintenta: necesita unos nueve segundos para darse cuenta de que el HAProxy cayó. La forma correcta de hacer mantenimiento es quitarlo primero del balanceador, y así lo probamos con cero errores.
 
-```bash
-A=http://imgproj-alb-399228811.us-east-1.elb.amazonaws.com
-for i in $(seq 1 40); do c=$(curl -s -o /dev/null -D h -w '%{http_code}' $A/health); echo "$(date +%T) HTTP $c $(grep -i x-lb-node h|cut -d' ' -f2|tr -d '\r') $(grep -i x-served-by h|cut -d' ' -f2|tr -d '\r')"; sleep 1; done
-```
+**¿Cómo sabe la aplicación que un archivo es realmente una imagen?** (Jorge)
+> Revisa los primeros bytes del archivo. Todo JPG empieza con los bytes FF D8 FF y todo PNG con 89 50 4E 47. Si el archivo dice ser ".jpg" pero no empieza así, lo rechazamos. Además, el tamaño máximo es de 5 megas.
 
-5. **Isidro** explica mientras **Kris** apaga `app-a` en otra pestaña de CloudShell. Todo sigue en `HTTP 200`, ahora solo con `app-b`:
+**¿Dónde está la contraseña de la base de datos?** (Edwin)
+> En AWS Secrets Manager. La generó automáticamente CloudFormation al crear el sistema. La aplicación la lee al iniciar usando el rol de su servidor, así que la contraseña nunca se escribió en el código ni en ningún documento.
 
-```bash
-aws ssm send-command --targets Key=tag:Name,Values=app-a --document-name AWS-RunShellScript --parameters 'commands=["systemctl stop imgapp"]'
-```
+**¿Cómo demuestran que la base de datos no es pública?** (Edwin)
+> Su dirección resuelve a una IP privada, la 10.0.21.108, y al intentar conectarnos desde internet al puerto de PostgreSQL no hay respuesta. Además, la configuración de RDS muestra el acceso público desactivado.
 
-6. **Kris** la vuelve a encender:
+**¿Qué hace exactamente el botón de borrar historial?** (Jorge)
+> Borra todos los registros de la tabla de imágenes, y sus etiquetas se borran en cascada. Las imágenes se conservan en S3 porque la aplicación no tiene permiso de borrar archivos; eso es privilegio mínimo y además funciona como respaldo. Lo probamos en el sistema real y quedó registrado en los dos servidores.
 
-```bash
-aws ssm send-command --targets Key=tag:Name,Values=app-a --document-name AWS-RunShellScript --parameters 'commands=["systemctl start imgapp"]'
-```
+**¿Cómo actualizaron la aplicación sin apagar el sitio?** (Kris)
+> Una réplica a la vez. Mientras una se actualiza, la otra atiende. Y usamos una recarga suave: Gunicorn arranca los procesos con el código nuevo y deja que los anteriores terminen lo que estaban atendiendo. Así medimos cero errores en 133 solicitudes.
 
-7. **Isidro** muestra el retiro ordenado de un balanceador. En el target group: seleccionar `haproxy-a` → **Anular el registro** (*Deregister*). El sitio sigue respondiendo por `haproxy-b`. Después: **Registrar destinos** → `haproxy-a`, puerto 80.
-8. **Jorge** presiona **"Borrar historial"**, confirma y vuelve a analizar una imagen para dejar el historial con datos.
+**¿Por qué CloudFormation y no Terraform?** (Kris)
+> Porque CloudFormation viene integrado en AWS, no hay que instalar nada y la plantilla se sube desde la consola. Para un proyecto que vive completamente en AWS fue lo más directo. Terraform tendría sentido si usáramos varias nubes.
 
-Si algo falla en vivo, muestren las capturas del informe (Figuras 8 a 14): son del mismo sistema y de las mismas pruebas.
+**¿Por qué RDS y no DynamoDB?** (Edwin o Jorge)
+> Porque el historial se consulta ordenado por fecha y relacionando imágenes con etiquetas, y eso es natural en una base relacional. RDS además nos da respaldos y restauración a un punto en el tiempo, y nos permitió demostrar claramente el acceso privado.
 
-## 6. Preguntas que cualquiera debe poder responder
+**¿Cuánto cuesta mantener esto?** (Kris)
+> Varios recursos cobran por hora, sobre todo el NAT Gateway, el balanceador y la base de datos. Por eso, después de la presentación vamos a borrar todo el stack. Como está en una plantilla, podemos volver a crearlo cuando queramos.
 
-- **¿Qué hace Rekognition?** Detecta objetos, escenas y conceptos en una imagen y da un porcentaje de confianza, sin que tengamos que entrenar un modelo.
-- **¿Dónde se guarda cada cosa?** La imagen en S3; las etiquetas, la confianza y la fecha en RDS; la contraseña en Secrets Manager.
-- **¿Qué pasa si se apaga una réplica?** HAProxy la marca DOWN y reintenta en la otra: 0 errores.
-- **¿Qué pasa si se apaga un HAProxy?** El ALB lo retira en unos 9 s. Con el retiro ordenado, 0 errores.
-- **¿Cuáles son los 4 controles de seguridad?**
-  - Privilegio mínimo en el rol de IAM.
-  - Secretos fuera del código, en Secrets Manager.
-  - Base de datos privada.
-  - Validación de tipo y tamaño de archivo.
-- **¿Qué mejorarían?**
-  - RDS Multi-AZ.
-  - Un segundo NAT Gateway.
-  - Auto Scaling.
-  - HTTPS con Certificate Manager.
-  - Usuarios con Cognito.
-- **¿Cuánto cuesta?** Los recursos cobran por hora, sobre todo el NAT Gateway, el ALB y RDS. Por eso el stack se borra después de presentar.
+---
 
-## 7. Lista final antes de las 7:00 p. m.
+## Antes de presentar
 
-- [ ] Cada quien leyó su parte y la sección 6.
-- [ ] El sitio abre (probar en el navegador que se usará para proyectar).
-- [ ] Pestañas de la demo abiertas y sesión de AWS iniciada.
-- [ ] Hay datos en el historial para mostrar.
-- [ ] Presentación en PDF descargada como respaldo.
-- [ ] Vestimenta formal.
-- [ ] Después de la presentación: vaciar el bucket y borrar el stack en CloudFormation.
+- Cada quien lee su parte en voz alta al menos dos veces, y lee las respuestas preparadas.
+- Kris y Jorge dejan abiertos el sitio, la consola de S3, el target group del balanceador y CloudShell con la sesión de AWS iniciada. Los comandos de la demo están en `DESPLIEGUE.md` y se pueden copiar de ahí.
+- Comprobar que el sitio abre en la computadora con la que se va a proyectar.
+- Tener la presentación en PDF descargada por si falla internet.
+- Si algo falla en la demo, mostrar las capturas del informe (Figuras 8 a 14): son del mismo sistema y de las mismas pruebas.
+- Vestimenta formal.
