@@ -238,6 +238,11 @@ LAYOUT = """<!doctype html>
  .btn-primary:disabled{background:#c7d2fe;box-shadow:none;cursor:not-allowed;transform:none}
  .btn-ghost{background:var(--surface);border-color:var(--line);color:var(--ink)}
  .btn-ghost:hover{background:var(--soft)}
+ .btn-danger{background:var(--surface);border-color:#fecaca;color:var(--bad)}
+ .btn-danger:hover{background:var(--bad-soft)}
+ .btn-danger svg{width:16px;height:16px}
+ .page-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:28px}
+ .page-head .lead{margin:0}
  .alert{display:flex;gap:10px;align-items:flex-start;padding:12px 16px;border-radius:12px;margin-bottom:20px;font-size:.95rem}
  .alert svg{flex:none;width:18px;height:18px;margin-top:2px}
  .alert-bad{background:var(--bad-soft);color:var(--bad);border:1px solid #fecaca}
@@ -359,8 +364,15 @@ RESULT = """
 <p class="hint" style="margin-top:16px">ID {{ image.id }}</p>"""
 
 HISTORY = """
-<h1>Historial</h1>
-<p class="lead">Imágenes procesadas, de la más reciente a la más antigua.</p>
+{% if cleared is not none %}<div class="alert alert-ok">""" + ICON_OK + """<div>Historial borrado: se eliminaron {{ cleared }} registro{{ '' if cleared == 1 else 's' }}.</div></div>{% endif %}
+<div class="page-head">
+ <div><h1>Historial</h1><p class="lead">Imágenes procesadas, de la más reciente a la más antigua.</p></div>
+ {% if rows %}
+ <form method="post" action="{{ url_for('clear_history') }}" onsubmit="return confirm('¿Borrar todo el historial? Se eliminarán {{ rows|length }} registro(s) de la base de datos. Esta acción no se puede deshacer.');">
+  <button class="btn btn-danger" type="submit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>Borrar historial</button>
+ </form>
+ {% endif %}
+</div>
 {% if rows %}
 <div class="gallery">
  {% for r in rows %}
@@ -424,7 +436,7 @@ def upload():
     except psycopg2.Error:
         log.exception("Error de base de datos al registrar %s", key)
         return page("Subir imagen", UPLOAD, status=503, max_mb=MAX_MB,
-                    error="La imagen se analizo, pero no se pudo guardar el resultado en la base de datos.")
+                    error="La imagen se analizó, pero no se pudo guardar el resultado en la base de datos.")
     log.info("Imagen %s procesada con %d etiquetas", image_id, len(labels))
     return redirect(url_for("show", image_id=image_id, new=1))
 
@@ -459,7 +471,22 @@ def history():
          LIMIT 100""")
     items = [{"id": r[0], "url": image_url(r[1]), "original_name": r[2],
               "processed_at": local_time(r[3]), "top": r[4]} for r in rows]
-    return page("Historial", HISTORY, rows=items)
+    cleared = request.args.get("cleared")
+    return page("Historial", HISTORY, rows=items,
+                cleared=int(cleared) if cleared and cleared.isdigit() else None)
+
+
+@app.post("/history/clear")
+def clear_history():
+    """Borra los registros del historial (images y, en cascada, labels).
+
+    Las imágenes se conservan en S3 como respaldo: el rol de las instancias
+    no tiene permiso de borrado (privilegio mínimo) y el bucket está versionado.
+    """
+    row = query("WITH d AS (DELETE FROM images RETURNING 1) SELECT count(*) FROM d", fetch="one")
+    deleted = int(row[0]) if row else 0
+    log.info("Historial borrado: %d registros", deleted)
+    return redirect(url_for("history", cleared=deleted))
 
 
 @app.get("/health")

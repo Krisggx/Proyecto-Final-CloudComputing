@@ -9,6 +9,7 @@ Group=appuser
 WorkingDirectory=/opt/imgapp
 EnvironmentFile=/etc/imgapp.env
 ExecStart=/opt/imgapp/venv/bin/gunicorn --workers 3 --timeout 60 --bind 0.0.0.0:5000 --access-logfile - app:app
+ExecReload=/bin/kill -s HUP $MAINPID
 Restart=always
 RestartSec=3
 

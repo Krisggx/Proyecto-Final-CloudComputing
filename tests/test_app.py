@@ -109,3 +109,27 @@ def test_html_is_escaped(client):
     resp = upload(client, JPEG, "<script>x</script>.jpg")
     page = client.get(resp.headers["Location"]).get_data(as_text=True)
     assert "<script>x</script>" not in page
+
+
+def test_clear_history(client, monkeypatch):
+    upload(client, JPEG, "perro.jpg")
+    upload(client, PNG, "foto.png")
+    real_query = appmod.query
+
+    def query(sql, params=None, fetch="all"):
+        if sql.startswith("WITH d AS (DELETE FROM images"):
+            n = len(client.store["images"])
+            client.store["images"].clear()
+            client.store["labels"].clear()
+            return (n,)
+        return real_query(sql, params, fetch)
+
+    monkeypatch.setattr(appmod, "query", query)
+    page = client.get("/history").get_data(as_text=True)
+    assert "Borrar historial" in page and "2 registro(s)" in page
+    resp = client.post("/history/clear")
+    assert resp.status_code == 302 and "cleared=2" in resp.headers["Location"]
+    after = client.get(resp.headers["Location"]).get_data(as_text=True)
+    assert "se eliminaron 2 registros" in after
+    assert "Todavía no hay imágenes procesadas" in after
+    assert "Borrar historial" not in after
