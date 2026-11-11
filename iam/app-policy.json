@@ -1,0 +1,26 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ImagenesYRespaldosEnS3",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:GetObject"],
+      "Resource": [
+        "arn:aws:s3:::NOMBRE-DEL-BUCKET/uploads/*",
+        "arn:aws:s3:::NOMBRE-DEL-BUCKET/backups/*"
+      ]
+    },
+    {
+      "Sid": "AnalisisConRekognition",
+      "Effect": "Allow",
+      "Action": "rekognition:DetectLabels",
+      "Resource": "*"
+    },
+    {
+      "Sid": "LeerContrasenaDeLaBase",
+      "Effect": "Allow",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:REGION:CUENTA:secret:imgproj-db-*"
+    }
+  ]
+}

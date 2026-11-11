@@ -1,0 +1,600 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Proyecto final Cloud Computing - Sistema web para analisis inteligente de
+  imagenes. ALB + 2 HAProxy + 2 replicas de la aplicacion en 2 zonas, bastion,
+  Amazon S3, Amazon Rekognition y Amazon RDS for PostgreSQL privado.
+  ARCHIVO GENERADO por infra/build_template.py a partir de template.src.yaml.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Acceso" }
+        Parameters: [KeyName, AllowedSSHCidr, InstanceProfileName]
+      - Label: { default: "Tamanos" }
+        Parameters: [InstanceType, DBInstanceClass]
+
+Parameters:
+  KeyName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Opcional) Par de llaves para SSH (en AWS Academy Learner Lab es "vockey").
+      Vacio = sin SSH; el acceso a los servidores es por AWS Systems Manager Session Manager.
+  AllowedSSHCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    Description: IP publica del equipo con /32 (por ejemplo 190.56.10.20/32). Solo esta IP podra entrar por SSH al bastion.
+  InstanceProfileName:
+    Type: String
+    Default: LabInstanceProfile
+    Description: >-
+      Perfil de instancia existente. En AWS Academy Learner Lab deje "LabInstanceProfile"
+      (no se pueden crear roles). En una cuenta normal deje el campo VACIO y la plantilla
+      creara un rol de privilegio minimo.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t2.micro, t2.small]
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    AllowedValues: [db.t3.micro, db.t3.small, db.t4g.micro]
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Amazon Linux 2023 (se resuelve automaticamente).
+
+Conditions:
+  CreateRole: !Equals [!Ref InstanceProfileName, ""]
+  HasKey: !Not [!Equals [!Ref KeyName, ""]]
+
+Resources:
+  # ------------------------------------------------------------------ Red
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{ Key: Name, Value: imgproj-vpc }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: imgproj-igw }]
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: imgproj-public-a }]
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: imgproj-public-b }]
+
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-app-a }]
+
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-app-b }]
+
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.21.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-data-a }]
+
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.22.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-data-b }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: imgproj-public-rt }]
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  NatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags: [{ Key: Name, Value: imgproj-nat }]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: imgproj-private-rt }]
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  AppSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  AppSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRouteTable, !Ref PublicRouteTable]
+
+  # ---------------------------------------------------- Grupos de seguridad
+  AlbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-alb
+      GroupDescription: ALB publico - HTTP desde internet
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+
+  BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-bastion
+      GroupDescription: Bastion - SSH solo desde la IP del equipo
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref AllowedSSHCidr }
+
+  HAProxySG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-haproxy
+      GroupDescription: HAProxy - HTTP desde el ALB; estadisticas y SSH desde el bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref AlbSG }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref BastionSG }
+        - { IpProtocol: tcp, FromPort: 8404, ToPort: 8404, SourceSecurityGroupId: !Ref BastionSG }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, SourceSecurityGroupId: !Ref BastionSG }
+
+  AppSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-app
+      GroupDescription: Aplicacion - puerto 5000 solo desde HAProxy; SSH desde el bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5000, ToPort: 5000, SourceSecurityGroupId: !Ref HAProxySG }
+        - { IpProtocol: tcp, FromPort: 5000, ToPort: 5000, SourceSecurityGroupId: !Ref BastionSG }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, SourceSecurityGroupId: !Ref BastionSG }
+
+  DatabaseSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-rds
+      GroupDescription: RDS - PostgreSQL solo desde la aplicacion y el bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref AppSG }
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref BastionSG }
+
+  # ------------------------------------------------------- S3 y secretos
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      Tags: [{ Key: Name, Value: imgproj-images }]
+
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub imgproj-db-${AWS::StackName}
+      Description: Credenciales de la base de datos (generadas automaticamente, nadie las escribe a mano)
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "imgadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 24
+        ExcludeCharacters: "\"@/\\'` "
+
+  # -------------------------------------------- IAM (solo cuenta normal)
+  AppRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: imgproj-least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource:
+                  - !Sub ${ImagesBucket.Arn}/uploads/*
+                  - !Sub ${ImagesBucket.Arn}/backups/*
+              - Effect: Allow
+                Action: rekognition:DetectLabels
+                Resource: "*"
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DBSecret
+
+  AppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateRole
+    Properties:
+      Roles: [!Ref AppRole]
+
+  # ----------------------------------------------------------- Base de datos
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subredes privadas de datos
+      SubnetIds: [!Ref DataSubnetA, !Ref DataSubnetB]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub imgproj-db-${AWS::StackName}
+      # Sin EngineVersion: RDS usa la version de PostgreSQL vigente por defecto
+      # (fijar una version menor puede fallar cuando AWS la retira).
+      Engine: postgres
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: "20"
+      StorageType: gp2
+      StorageEncrypted: true
+      DBName: imgdb
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DBSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref DatabaseSG]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "08:00-09:00"
+      DeletionProtection: false
+      Tags: [{ Key: Name, Value: imgproj-db }]
+
+  # --------------------------------------------- Replicas de la aplicacion
+  AppA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref AppSubnetA
+      SecurityGroupIds: [!Ref AppSG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: app-a }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y python3 python3-pip
+            id appuser || useradd --system --create-home --shell /sbin/nologin appuser
+            mkdir -p /opt/imgapp
+            echo "__APP_PY_GZB64__" | base64 -d | gunzip > /opt/imgapp/app.py
+            python3 -m venv /opt/imgapp/venv
+            /opt/imgapp/venv/bin/pip install --quiet __APP_REQUIREMENTS__
+            chown -R appuser:appuser /opt/imgapp
+            cat > /etc/imgapp.env <<'ENVEOF'
+            AWS_REGION=${AWS::Region}
+            BUCKET=${ImagesBucket}
+            DB_HOST=${Database.Endpoint.Address}
+            DB_NAME=imgdb
+            DB_SECRET_ARN=${DBSecret}
+            INSTANCE_NAME=${NodeName}
+            MIN_CONFIDENCE=70
+            ENVEOF
+            chmod 644 /etc/imgapp.env
+            cat > /etc/systemd/system/imgapp.service <<'SVCEOF'
+            __FILE:systemd/imgapp.service__
+            SVCEOF
+            systemctl daemon-reload
+            systemctl enable --now imgapp
+          - { NodeName: app-a }
+
+  AppB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref AppSubnetB
+      SecurityGroupIds: [!Ref AppSG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: app-b }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y python3 python3-pip
+            id appuser || useradd --system --create-home --shell /sbin/nologin appuser
+            mkdir -p /opt/imgapp
+            echo "__APP_PY_GZB64__" | base64 -d | gunzip > /opt/imgapp/app.py
+            python3 -m venv /opt/imgapp/venv
+            /opt/imgapp/venv/bin/pip install --quiet __APP_REQUIREMENTS__
+            chown -R appuser:appuser /opt/imgapp
+            cat > /etc/imgapp.env <<'ENVEOF'
+            AWS_REGION=${AWS::Region}
+            BUCKET=${ImagesBucket}
+            DB_HOST=${Database.Endpoint.Address}
+            DB_NAME=imgdb
+            DB_SECRET_ARN=${DBSecret}
+            INSTANCE_NAME=${NodeName}
+            MIN_CONFIDENCE=70
+            ENVEOF
+            chmod 644 /etc/imgapp.env
+            cat > /etc/systemd/system/imgapp.service <<'SVCEOF'
+            __FILE:systemd/imgapp.service__
+            SVCEOF
+            systemctl daemon-reload
+            systemctl enable --now imgapp
+          - { NodeName: app-b }
+
+  # ---------------------------------------------------------------- HAProxy
+  HAProxyA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds: [!Ref HAProxySG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: haproxy-a }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y haproxy
+            cat > /etc/haproxy/haproxy.cfg <<'CFGEOF'
+            __FILE:haproxy/haproxy.cfg__
+            CFGEOF
+            haproxy -c -f /etc/haproxy/haproxy.cfg
+            systemctl enable --now haproxy
+          - NodeName: haproxy-a
+            AppAIp: !GetAtt AppA.PrivateIp
+            AppBIp: !GetAtt AppB.PrivateIp
+
+  HAProxyB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref PublicSubnetB
+      SecurityGroupIds: [!Ref HAProxySG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: haproxy-b }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y haproxy
+            cat > /etc/haproxy/haproxy.cfg <<'CFGEOF'
+            __FILE:haproxy/haproxy.cfg__
+            CFGEOF
+            haproxy -c -f /etc/haproxy/haproxy.cfg
+            systemctl enable --now haproxy
+          - NodeName: haproxy-b
+            AppAIp: !GetAtt AppA.PrivateIp
+            AppBIp: !GetAtt AppB.PrivateIp
+
+  # ------------------------------------------------------------------- ALB
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: imgproj-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      SecurityGroups: [!Ref AlbSG]
+
+  HAProxyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: imgproj-tg-haproxy
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /lb-health
+      HealthCheckIntervalSeconds: 5
+      HealthCheckTimeoutSeconds: 4
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "15" }
+      Targets:
+        - { Id: !Ref HAProxyA, Port: 80 }
+        - { Id: !Ref HAProxyB, Port: 80 }
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref HAProxyTargetGroup
+
+  # --------------------------------------------------------------- Bastion
+  Bastion:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds: [!Ref BastionSG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: bastion }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          # Cliente PostgreSQL mas reciente disponible (pg_dump debe ser >= version del servidor)
+          PGPKG=$(dnf -q list --available 'postgresql1[0-9]' 2>/dev/null | awk '/^postgresql1[0-9]\./ {sub(/\..*/, "", $1); print $1}' | sort -V | tail -1)
+          dnf install -y "${!PGPKG:-postgresql15}" jq
+          cat > /etc/imgapp.env <<'ENVEOF'
+          AWS_REGION=${AWS::Region}
+          BUCKET=${ImagesBucket}
+          DB_HOST=${Database.Endpoint.Address}
+          DB_NAME=imgdb
+          DB_SECRET_ARN=${DBSecret}
+          ALB_URL=http://${LoadBalancer.DNSName}
+          HAPROXY_A=${HAProxyA.PrivateIp}
+          HAPROXY_B=${HAProxyB.PrivateIp}
+          APP_A=${AppA.PrivateIp}
+          APP_B=${AppB.PrivateIp}
+          ENVEOF
+          chmod 644 /etc/imgapp.env
+          cat > /usr/local/bin/imgproj-backup <<'BKEOF'
+          __FILE:scripts/backup.sh__
+          BKEOF
+          cat > /usr/local/bin/imgproj-continuidad <<'CTEOF'
+          __FILE:scripts/continuidad.sh__
+          CTEOF
+          cat > /usr/local/bin/imgproj-psql <<'PSEOF'
+          #!/bin/bash
+          # Abre psql contra RDS con la contrasena tomada de Secrets Manager.
+          source /etc/imgapp.env
+          SECRET=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DB_SECRET_ARN" --query SecretString --output text)
+          export PGUSER=$(echo "$SECRET" | jq -r .username) PGPASSWORD=$(echo "$SECRET" | jq -r .password) PGSSLMODE=require
+          exec psql -h "$DB_HOST" -d "$DB_NAME" "$@"
+          PSEOF
+          chmod 755 /usr/local/bin/imgproj-backup /usr/local/bin/imgproj-continuidad /usr/local/bin/imgproj-psql
+          cat > /etc/systemd/system/imgproj-backup.service <<'UNITEOF'
+          [Unit]
+          Description=Respaldo logico de la base de datos hacia S3
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/imgproj-backup
+          UNITEOF
+          cat > /etc/systemd/system/imgproj-backup.timer <<'UNITEOF'
+          [Unit]
+          Description=Respaldo diario de la base de datos
+          [Timer]
+          OnCalendar=*-*-* 06:00:00
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+          UNITEOF
+          systemctl daemon-reload
+          systemctl enable --now imgproj-backup.timer
+
+Outputs:
+  AppUrl:
+    Description: URL publica del sistema (Application Load Balancer)
+    Value: !Sub http://${LoadBalancer.DNSName}
+  BastionPublicIp:
+    Description: IP publica del bastion (ssh -A ec2-user@IP)
+    Value: !GetAtt Bastion.PublicIp
+  ImagesBucketName:
+    Description: Bucket de S3 con las imagenes
+    Value: !Ref ImagesBucket
+  DatabaseEndpoint:
+    Description: Endpoint privado de RDS
+    Value: !GetAtt Database.Endpoint.Address
+  DBSecretArn:
+    Description: ARN del secreto con las credenciales de la base
+    Value: !Ref DBSecret
+  PrivateIps:
+    Description: IP privadas (haproxy-a, haproxy-b, app-a, app-b)
+    Value: !Sub "${HAProxyA.PrivateIp}, ${HAProxyB.PrivateIp}, ${AppA.PrivateIp}, ${AppB.PrivateIp}"
+  TargetGroupArn:
+    Description: Target group del ALB (evidencia de destinos healthy)
+    Value: !Ref HAProxyTargetGroup

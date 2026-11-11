@@ -1,0 +1,727 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Proyecto final Cloud Computing - Sistema web para analisis inteligente de
+  imagenes. ALB + 2 HAProxy + 2 replicas de la aplicacion en 2 zonas, bastion,
+  Amazon S3, Amazon Rekognition y Amazon RDS for PostgreSQL privado.
+  ARCHIVO GENERADO por infra/build_template.py a partir de template.src.yaml.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Acceso" }
+        Parameters: [KeyName, AllowedSSHCidr, InstanceProfileName]
+      - Label: { default: "Tamanos" }
+        Parameters: [InstanceType, DBInstanceClass]
+
+Parameters:
+  KeyName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Opcional) Par de llaves para SSH (en AWS Academy Learner Lab es "vockey").
+      Vacio = sin SSH; el acceso a los servidores es por AWS Systems Manager Session Manager.
+  AllowedSSHCidr:
+    Type: String
+    Default: 0.0.0.0/0
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    Description: IP publica del equipo con /32 (por ejemplo 190.56.10.20/32). Solo esta IP podra entrar por SSH al bastion.
+  InstanceProfileName:
+    Type: String
+    Default: LabInstanceProfile
+    Description: >-
+      Perfil de instancia existente. En AWS Academy Learner Lab deje "LabInstanceProfile"
+      (no se pueden crear roles). En una cuenta normal deje el campo VACIO y la plantilla
+      creara un rol de privilegio minimo.
+  InstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues: [t3.micro, t3.small, t2.micro, t2.small]
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+    AllowedValues: [db.t3.micro, db.t3.small, db.t4g.micro]
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Amazon Linux 2023 (se resuelve automaticamente).
+
+Conditions:
+  CreateRole: !Equals [!Ref InstanceProfileName, ""]
+  HasKey: !Not [!Equals [!Ref KeyName, ""]]
+
+Resources:
+  # ------------------------------------------------------------------ Red
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{ Key: Name, Value: imgproj-vpc }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: imgproj-igw }]
+
+  GatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: imgproj-public-a }]
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      MapPublicIpOnLaunch: true
+      Tags: [{ Key: Name, Value: imgproj-public-b }]
+
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-app-a }]
+
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-app-b }]
+
+  DataSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.21.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-data-a }]
+
+  DataSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.22.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: imgproj-data-b }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: imgproj-public-rt }]
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: GatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  NatEIP:
+    Type: AWS::EC2::EIP
+    DependsOn: GatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEIP.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags: [{ Key: Name, Value: imgproj-nat }]
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags: [{ Key: Name, Value: imgproj-private-rt }]
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  AppSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  AppSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref PrivateRouteTable, !Ref PublicRouteTable]
+
+  # ---------------------------------------------------- Grupos de seguridad
+  AlbSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-alb
+      GroupDescription: ALB publico - HTTP desde internet
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0 }
+
+  BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-bastion
+      GroupDescription: Bastion - SSH solo desde la IP del equipo
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, CidrIp: !Ref AllowedSSHCidr }
+
+  HAProxySG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-haproxy
+      GroupDescription: HAProxy - HTTP desde el ALB; estadisticas y SSH desde el bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref AlbSG }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, SourceSecurityGroupId: !Ref BastionSG }
+        - { IpProtocol: tcp, FromPort: 8404, ToPort: 8404, SourceSecurityGroupId: !Ref BastionSG }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, SourceSecurityGroupId: !Ref BastionSG }
+
+  AppSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-app
+      GroupDescription: Aplicacion - puerto 5000 solo desde HAProxy; SSH desde el bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5000, ToPort: 5000, SourceSecurityGroupId: !Ref HAProxySG }
+        - { IpProtocol: tcp, FromPort: 5000, ToPort: 5000, SourceSecurityGroupId: !Ref BastionSG }
+        - { IpProtocol: tcp, FromPort: 22, ToPort: 22, SourceSecurityGroupId: !Ref BastionSG }
+
+  DatabaseSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: imgproj-sg-rds
+      GroupDescription: RDS - PostgreSQL solo desde la aplicacion y el bastion
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref AppSG }
+        - { IpProtocol: tcp, FromPort: 5432, ToPort: 5432, SourceSecurityGroupId: !Ref BastionSG }
+
+  # ------------------------------------------------------- S3 y secretos
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      Tags: [{ Key: Name, Value: imgproj-images }]
+
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub imgproj-db-${AWS::StackName}
+      Description: Credenciales de la base de datos (generadas automaticamente, nadie las escribe a mano)
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "imgadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 24
+        ExcludeCharacters: "\"@/\\'` "
+
+  # -------------------------------------------- IAM (solo cuenta normal)
+  AppRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: imgproj-least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource:
+                  - !Sub ${ImagesBucket.Arn}/uploads/*
+                  - !Sub ${ImagesBucket.Arn}/backups/*
+              - Effect: Allow
+                Action: rekognition:DetectLabels
+                Resource: "*"
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref DBSecret
+
+  AppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Condition: CreateRole
+    Properties:
+      Roles: [!Ref AppRole]
+
+  # ----------------------------------------------------------- Base de datos
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subredes privadas de datos
+      SubnetIds: [!Ref DataSubnetA, !Ref DataSubnetB]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub imgproj-db-${AWS::StackName}
+      # Sin EngineVersion: RDS usa la version de PostgreSQL vigente por defecto
+      # (fijar una version menor puede fallar cuando AWS la retira).
+      Engine: postgres
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: "20"
+      StorageType: gp2
+      StorageEncrypted: true
+      DBName: imgdb
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DBSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DBSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref DatabaseSG]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 7
+      PreferredBackupWindow: "08:00-09:00"
+      DeletionProtection: false
+      Tags: [{ Key: Name, Value: imgproj-db }]
+
+  # --------------------------------------------- Replicas de la aplicacion
+  AppA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref AppSubnetA
+      SecurityGroupIds: [!Ref AppSG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: app-a }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y python3 python3-pip
+            id appuser || useradd --system --create-home --shell /sbin/nologin appuser
+            mkdir -p /opt/imgapp
+            echo "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" | base64 -d | gunzip > /opt/imgapp/app.py
+            python3 -m venv /opt/imgapp/venv
+            /opt/imgapp/venv/bin/pip install --quiet 'flask==3.1.1' 'gunicorn==23.0.0' 'boto3>=1.35' 'psycopg2-binary==2.9.10'
+            chown -R appuser:appuser /opt/imgapp
+            cat > /etc/imgapp.env <<'ENVEOF'
+            AWS_REGION=${AWS::Region}
+            BUCKET=${ImagesBucket}
+            DB_HOST=${Database.Endpoint.Address}
+            DB_NAME=imgdb
+            DB_SECRET_ARN=${DBSecret}
+            INSTANCE_NAME=${NodeName}
+            MIN_CONFIDENCE=70
+            ENVEOF
+            chmod 644 /etc/imgapp.env
+            cat > /etc/systemd/system/imgapp.service <<'SVCEOF'
+            [Unit]
+            Description=Aplicacion web de analisis de imagenes (Gunicorn + Flask)
+            After=network-online.target
+            Wants=network-online.target
+
+            [Service]
+            User=appuser
+            Group=appuser
+            WorkingDirectory=/opt/imgapp
+            EnvironmentFile=/etc/imgapp.env
+            ExecStart=/opt/imgapp/venv/bin/gunicorn --workers 3 --timeout 60 --bind 0.0.0.0:5000 --access-logfile - app:app
+            Restart=always
+            RestartSec=3
+
+            [Install]
+            WantedBy=multi-user.target
+            SVCEOF
+            systemctl daemon-reload
+            systemctl enable --now imgapp
+          - { NodeName: app-a }
+
+  AppB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref AppSubnetB
+      SecurityGroupIds: [!Ref AppSG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: app-b }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y python3 python3-pip
+            id appuser || useradd --system --create-home --shell /sbin/nologin appuser
+            mkdir -p /opt/imgapp
+            echo "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" | base64 -d | gunzip > /opt/imgapp/app.py
+            python3 -m venv /opt/imgapp/venv
+            /opt/imgapp/venv/bin/pip install --quiet 'flask==3.1.1' 'gunicorn==23.0.0' 'boto3>=1.35' 'psycopg2-binary==2.9.10'
+            chown -R appuser:appuser /opt/imgapp
+            cat > /etc/imgapp.env <<'ENVEOF'
+            AWS_REGION=${AWS::Region}
+            BUCKET=${ImagesBucket}
+            DB_HOST=${Database.Endpoint.Address}
+            DB_NAME=imgdb
+            DB_SECRET_ARN=${DBSecret}
+            INSTANCE_NAME=${NodeName}
+            MIN_CONFIDENCE=70
+            ENVEOF
+            chmod 644 /etc/imgapp.env
+            cat > /etc/systemd/system/imgapp.service <<'SVCEOF'
+            [Unit]
+            Description=Aplicacion web de analisis de imagenes (Gunicorn + Flask)
+            After=network-online.target
+            Wants=network-online.target
+
+            [Service]
+            User=appuser
+            Group=appuser
+            WorkingDirectory=/opt/imgapp
+            EnvironmentFile=/etc/imgapp.env
+            ExecStart=/opt/imgapp/venv/bin/gunicorn --workers 3 --timeout 60 --bind 0.0.0.0:5000 --access-logfile - app:app
+            Restart=always
+            RestartSec=3
+
+            [Install]
+            WantedBy=multi-user.target
+            SVCEOF
+            systemctl daemon-reload
+            systemctl enable --now imgapp
+          - { NodeName: app-b }
+
+  # ---------------------------------------------------------------- HAProxy
+  HAProxyA:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds: [!Ref HAProxySG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: haproxy-a }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y haproxy
+            cat > /etc/haproxy/haproxy.cfg <<'CFGEOF'
+            # HAProxy - balanceo interno hacia las dos replicas de la aplicacion.
+            # CloudFormation reemplaza NodeName, AppAIp y AppBIp al crear cada nodo
+            # (nombre del nodo HAProxy e IP privadas de app-a y app-b).
+            global
+                log stdout format raw local0
+                maxconn 2000
+
+            defaults
+                mode http
+                log global
+                option httplog
+                option forwardfor
+                timeout connect 5s
+                timeout client  60s
+                timeout server  60s
+                retries 2
+                option redispatch
+
+            frontend fe_web
+                bind *:80
+                # El ALB comprueba este endpoint: responde 200 mientras HAProxy este vivo.
+                monitor-uri /lb-health
+                http-response set-header X-LB-Node ${NodeName}
+                default_backend be_app
+
+            backend be_app
+                balance roundrobin
+                option httpchk GET /health
+                http-check expect status 200
+                server app-a ${AppAIp}:5000 check inter 5s fall 3 rise 2
+                server app-b ${AppBIp}:5000 check inter 5s fall 3 rise 2
+
+            listen stats
+                bind *:8404
+                stats enable
+                stats uri /stats
+                stats refresh 5s
+                stats show-node ${NodeName}
+            CFGEOF
+            haproxy -c -f /etc/haproxy/haproxy.cfg
+            systemctl enable --now haproxy
+          - NodeName: haproxy-a
+            AppAIp: !GetAtt AppA.PrivateIp
+            AppBIp: !GetAtt AppB.PrivateIp
+
+  HAProxyB:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref PublicSubnetB
+      SecurityGroupIds: [!Ref HAProxySG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: haproxy-b }]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            dnf install -y haproxy
+            cat > /etc/haproxy/haproxy.cfg <<'CFGEOF'
+            # HAProxy - balanceo interno hacia las dos replicas de la aplicacion.
+            # CloudFormation reemplaza NodeName, AppAIp y AppBIp al crear cada nodo
+            # (nombre del nodo HAProxy e IP privadas de app-a y app-b).
+            global
+                log stdout format raw local0
+                maxconn 2000
+
+            defaults
+                mode http
+                log global
+                option httplog
+                option forwardfor
+                timeout connect 5s
+                timeout client  60s
+                timeout server  60s
+                retries 2
+                option redispatch
+
+            frontend fe_web
+                bind *:80
+                # El ALB comprueba este endpoint: responde 200 mientras HAProxy este vivo.
+                monitor-uri /lb-health
+                http-response set-header X-LB-Node ${NodeName}
+                default_backend be_app
+
+            backend be_app
+                balance roundrobin
+                option httpchk GET /health
+                http-check expect status 200
+                server app-a ${AppAIp}:5000 check inter 5s fall 3 rise 2
+                server app-b ${AppBIp}:5000 check inter 5s fall 3 rise 2
+
+            listen stats
+                bind *:8404
+                stats enable
+                stats uri /stats
+                stats refresh 5s
+                stats show-node ${NodeName}
+            CFGEOF
+            haproxy -c -f /etc/haproxy/haproxy.cfg
+            systemctl enable --now haproxy
+          - NodeName: haproxy-b
+            AppAIp: !GetAtt AppA.PrivateIp
+            AppBIp: !GetAtt AppB.PrivateIp
+
+  # ------------------------------------------------------------------- ALB
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: imgproj-alb
+      Scheme: internet-facing
+      Type: application
+      Subnets: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      SecurityGroups: [!Ref AlbSG]
+
+  HAProxyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: imgproj-tg-haproxy
+      VpcId: !Ref VPC
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /lb-health
+      HealthCheckIntervalSeconds: 5
+      HealthCheckTimeoutSeconds: 4
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "15" }
+      Targets:
+        - { Id: !Ref HAProxyA, Port: 80 }
+        - { Id: !Ref HAProxyB, Port: 80 }
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref HAProxyTargetGroup
+
+  # --------------------------------------------------------------- Bastion
+  Bastion:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKey, !Ref KeyName, !Ref "AWS::NoValue"]
+      SubnetId: !Ref PublicSubnetA
+      SecurityGroupIds: [!Ref BastionSG]
+      IamInstanceProfile: !If [CreateRole, !Ref AppInstanceProfile, !Ref InstanceProfileName]
+      Tags: [{ Key: Name, Value: bastion }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          # Cliente PostgreSQL mas reciente disponible (pg_dump debe ser >= version del servidor)
+          PGPKG=$(dnf -q list --available 'postgresql1[0-9]' 2>/dev/null | awk '/^postgresql1[0-9]\./ {sub(/\..*/, "", $1); print $1}' | sort -V | tail -1)
+          dnf install -y "${!PGPKG:-postgresql15}" jq
+          cat > /etc/imgapp.env <<'ENVEOF'
+          AWS_REGION=${AWS::Region}
+          BUCKET=${ImagesBucket}
+          DB_HOST=${Database.Endpoint.Address}
+          DB_NAME=imgdb
+          DB_SECRET_ARN=${DBSecret}
+          ALB_URL=http://${LoadBalancer.DNSName}
+          HAPROXY_A=${HAProxyA.PrivateIp}
+          HAPROXY_B=${HAProxyB.PrivateIp}
+          APP_A=${AppA.PrivateIp}
+          APP_B=${AppB.PrivateIp}
+          ENVEOF
+          chmod 644 /etc/imgapp.env
+          cat > /usr/local/bin/imgproj-backup <<'BKEOF'
+          #!/bin/bash
+          # Respaldo logico de la base de datos hacia S3 (se ejecuta en el bastion).
+          # Lee la configuracion de /etc/imgapp.env y la contrasena de Secrets Manager.
+          set -euo pipefail
+          source /etc/imgapp.env
+          SECRET=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DB_SECRET_ARN" --query SecretString --output text)
+          export PGUSER=$(echo "$SECRET" | jq -r .username)
+          export PGPASSWORD=$(echo "$SECRET" | jq -r .password)
+          export PGSSLMODE=require
+          STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+          pg_dump -h "$DB_HOST" -d "$DB_NAME" | gzip | aws s3 cp - "s3://$BUCKET/backups/imgdb-$STAMP.sql.gz"
+          echo "Respaldo guardado en s3://$BUCKET/backups/imgdb-$STAMP.sql.gz"
+          BKEOF
+          cat > /usr/local/bin/imgproj-continuidad <<'CTEOF'
+          #!/bin/bash
+          # Prueba de continuidad: consulta el ALB cada segundo y muestra
+          # el codigo HTTP, el nodo HAProxy y la replica que respondio.
+          # Uso: ./continuidad.sh http://DNS-DEL-ALB
+          URL="$1"
+          while true; do
+            OUT=$(curl -s -o /dev/null -D - -w "%{http_code}" --max-time 3 "$URL/health")
+            CODE=$(echo "$OUT" | tail -n1)
+            LB=$(echo "$OUT" | grep -i '^x-lb-node' | cut -d' ' -f2 | tr -d '\r')
+            APP=$(echo "$OUT" | grep -i '^x-served-by' | cut -d' ' -f2 | tr -d '\r')
+            echo "$(date +%H:%M:%S)  HTTP $CODE  balanceador=$LB  replica=$APP"
+            sleep 1
+          done
+          CTEOF
+          cat > /usr/local/bin/imgproj-psql <<'PSEOF'
+          #!/bin/bash
+          # Abre psql contra RDS con la contrasena tomada de Secrets Manager.
+          source /etc/imgapp.env
+          SECRET=$(aws secretsmanager get-secret-value --region "$AWS_REGION" --secret-id "$DB_SECRET_ARN" --query SecretString --output text)
+          export PGUSER=$(echo "$SECRET" | jq -r .username) PGPASSWORD=$(echo "$SECRET" | jq -r .password) PGSSLMODE=require
+          exec psql -h "$DB_HOST" -d "$DB_NAME" "$@"
+          PSEOF
+          chmod 755 /usr/local/bin/imgproj-backup /usr/local/bin/imgproj-continuidad /usr/local/bin/imgproj-psql
+          cat > /etc/systemd/system/imgproj-backup.service <<'UNITEOF'
+          [Unit]
+          Description=Respaldo logico de la base de datos hacia S3
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/imgproj-backup
+          UNITEOF
+          cat > /etc/systemd/system/imgproj-backup.timer <<'UNITEOF'
+          [Unit]
+          Description=Respaldo diario de la base de datos
+          [Timer]
+          OnCalendar=*-*-* 06:00:00
+          Persistent=true
+          [Install]
+          WantedBy=timers.target
+          UNITEOF
+          systemctl daemon-reload
+          systemctl enable --now imgproj-backup.timer
+
+Outputs:
+  AppUrl:
+    Description: URL publica del sistema (Application Load Balancer)
+    Value: !Sub http://${LoadBalancer.DNSName}
+  BastionPublicIp:
+    Description: IP publica del bastion (ssh -A ec2-user@IP)
+    Value: !GetAtt Bastion.PublicIp
+  ImagesBucketName:
+    Description: Bucket de S3 con las imagenes
+    Value: !Ref ImagesBucket
+  DatabaseEndpoint:
+    Description: Endpoint privado de RDS
+    Value: !GetAtt Database.Endpoint.Address
+  DBSecretArn:
+    Description: ARN del secreto con las credenciales de la base
+    Value: !Ref DBSecret
+  PrivateIps:
+    Description: IP privadas (haproxy-a, haproxy-b, app-a, app-b)
+    Value: !Sub "${HAProxyA.PrivateIp}, ${HAProxyB.PrivateIp}, ${AppA.PrivateIp}, ${AppB.PrivateIp}"
+  TargetGroupArn:
+    Description: Target group del ALB (evidencia de destinos healthy)
+    Value: !Ref HAProxyTargetGroup

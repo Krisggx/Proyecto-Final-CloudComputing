@@ -1,0 +1,8 @@
+*.pem
+*.key
+.env
+*.env
+!config/imgapp.env.example
+__pycache__/
+.venv/
+venv/
