@@ -318,6 +318,13 @@ LAYOUT = """<!doctype html>
  .tile-body{padding:14px 16px 16px;display:flex;flex-direction:column;gap:8px}
  .tile-name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
  .tile .chips{display:flex;flex-wrap:wrap;gap:6px}
+ .tile-wrap{position:relative}
+ .del{position:absolute;top:10px;right:10px;margin:0;z-index:2}
+ .icon-btn{width:34px;height:34px;border-radius:10px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.5);color:#fff;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:grid;place-items:center;cursor:pointer;opacity:.85;transition:.15s}
+ .icon-btn:hover{background:#c42b2b;border-color:#c42b2b;opacity:1}
+ .icon-btn svg{width:16px;height:16px}
+ .inline{display:inline;margin:0}
  .empty{text-align:center;padding:64px 24px;color:var(--muted)}
  .empty .icon{width:56px;height:56px;margin:0 auto 14px;border-radius:16px;background:var(--surface-2);display:grid;place-items:center}
  .empty .icon svg{width:26px;height:26px;stroke:var(--muted)}
@@ -347,6 +354,7 @@ document.getElementById('theme').addEventListener('click', function(){
 </body></html>"""
 
 ICON_ALERT = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>'
+ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>'
 ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/></svg>'
 
 UPLOAD = """
@@ -403,6 +411,9 @@ RESULT = """
   <div class="meta"><span class="chip">{{ image.processed_at }}</span><span class="chip accent">{{ labels|length }} etiqueta{{ '' if labels|length == 1 else 's' }}</span></div>
  </div>
  <div class="meta">
+  <form class="inline" method="post" action="{{ url_for('delete_image', image_id=image.id) }}" onsubmit="return confirm('¿Eliminar esta imagen del historial? Esta acción no se puede deshacer.');">
+   <button class="btn btn-danger" type="submit">""" + ICON_TRASH + """Eliminar</button>
+  </form>
   <a class="btn btn-ghost" href="{{ url_for('history') }}">Ver historial</a>
   <a class="btn btn-primary" href="{{ url_for('index') }}">Analizar otra</a>
  </div>
@@ -425,6 +436,7 @@ RESULT = """
 <p class="hint" style="margin-top:16px">ID {{ image.id }}</p>"""
 
 HISTORY = """
+{% if deleted %}<div class="alert alert-ok">""" + ICON_OK + """<div>Se eliminó «{{ deleted }}» del historial.</div></div>{% endif %}
 {% if cleared is not none %}<div class="alert alert-ok">""" + ICON_OK + """<div>Historial borrado: se eliminaron {{ cleared }} registro{{ '' if cleared == 1 else 's' }}.</div></div>{% endif %}
 <div class="page-head">
  <div><span class="eyebrow"><i></i>{{ rows|length }} imagen{{ '' if rows|length == 1 else 'es' }}</span><h1>Historial</h1><p class="lead">Imágenes procesadas, de la más reciente a la más antigua.</p></div>
@@ -437,6 +449,10 @@ HISTORY = """
 {% if rows %}
 <div class="gallery">
  {% for r in rows %}
+ <div class="tile-wrap">
+ <form class="del" method="post" action="{{ url_for('delete_image', image_id=r.id) }}" onsubmit="return confirm('¿Eliminar esta imagen del historial?');">
+  <button class="icon-btn" type="submit" title="Eliminar esta imagen" aria-label="Eliminar esta imagen">""" + ICON_TRASH + """</button>
+ </form>
  <a class="tile" href="{{ url_for('show', image_id=r.id) }}">
   <div class="thumb"><img src="{{ r.url }}" alt="{{ r.original_name }}" loading="lazy">{% if r.top %}<span class="badge">{{ r.top.split(', ')[0] }}</span>{% endif %}</div>
   <div class="tile-body">
@@ -445,6 +461,7 @@ HISTORY = """
    <div class="hint">{{ r.processed_at }}</div>
   </div>
  </a>
+ </div>
  {% endfor %}
 </div>
 {% else %}
@@ -534,7 +551,26 @@ def history():
               "processed_at": local_time(r[3]), "top": r[4]} for r in rows]
     cleared = request.args.get("cleared")
     return page("Historial", HISTORY, rows=items,
-                cleared=int(cleared) if cleared and cleared.isdigit() else None)
+                cleared=int(cleared) if cleared and cleared.isdigit() else None,
+                deleted=(request.args.get("deleted") or "")[:200])
+
+
+@app.post("/images/<image_id>/delete")
+def delete_image(image_id):
+    """Elimina una sola imagen del historial (sus etiquetas se borran en cascada).
+
+    Igual que el borrado completo, el archivo se conserva en S3 como respaldo.
+    """
+    try:
+        uuid.UUID(image_id)
+    except ValueError:
+        abort(404)
+    row = query("WITH d AS (DELETE FROM images WHERE id = %s RETURNING original_name) SELECT original_name FROM d",
+                (image_id,), fetch="one")
+    if row is None:
+        abort(404)
+    log.info("Imagen eliminada del historial: %s", image_id)
+    return redirect(url_for("history", deleted=row[0]))
 
 
 @app.post("/history/clear")

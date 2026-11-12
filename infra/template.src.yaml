@@ -360,7 +360,7 @@ Resources:
             dnf install -y python3 python3-pip
             id appuser || useradd --system --create-home --shell /sbin/nologin appuser
             mkdir -p /opt/imgapp
-            echo "__APP_PY_GZB64__" | base64 -d | gunzip > /opt/imgapp/app.py
+            echo "__APP_PY_GZB64__" | base64 -d | xz -d > /opt/imgapp/app.py
             python3 -m venv /opt/imgapp/venv
             /opt/imgapp/venv/bin/pip install --quiet __APP_REQUIREMENTS__
             chown -R appuser:appuser /opt/imgapp
@@ -399,7 +399,7 @@ Resources:
             dnf install -y python3 python3-pip
             id appuser || useradd --system --create-home --shell /sbin/nologin appuser
             mkdir -p /opt/imgapp
-            echo "__APP_PY_GZB64__" | base64 -d | gunzip > /opt/imgapp/app.py
+            echo "__APP_PY_GZB64__" | base64 -d | xz -d > /opt/imgapp/app.py
             python3 -m venv /opt/imgapp/venv
             /opt/imgapp/venv/bin/pip install --quiet __APP_REQUIREMENTS__
             chown -R appuser:appuser /opt/imgapp

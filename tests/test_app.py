@@ -133,3 +133,29 @@ def test_clear_history(client, monkeypatch):
     assert "se eliminaron 2 registros" in after
     assert "Todavía no hay imágenes procesadas" in after
     assert "Borrar historial" not in after
+
+
+def test_delete_one_image(client, monkeypatch):
+    first = upload(client, JPEG, "perro.jpg").headers["Location"].split("/images/")[1].split("?")[0]
+    upload(client, PNG, "gato.png")
+    real_query = appmod.query
+
+    def query(sql, params=None, fetch="all"):
+        if sql.startswith("WITH d AS (DELETE FROM images WHERE id"):
+            row = client.store["images"].pop(params[0], None)
+            client.store["labels"].pop(params[0], None)
+            return (row[2],) if row else None
+        return real_query(sql, params, fetch)
+
+    monkeypatch.setattr(appmod, "query", query)
+    hist = client.get("/history").get_data(as_text=True)
+    assert hist.count("/delete") == 2  # un botón por imagen
+    page = client.get("/images/%s" % first).get_data(as_text=True)
+    assert "/images/%s/delete" % first in page
+    resp = client.post("/images/%s/delete" % first)
+    assert resp.status_code == 302 and "deleted=perro.jpg" in resp.headers["Location"]
+    after = client.get(resp.headers["Location"]).get_data(as_text=True)
+    assert "Se eliminó «perro.jpg» del historial." in after
+    assert "gato.png" in after and ">perro.jpg<" not in after
+    assert client.post("/images/%s/delete" % first).status_code == 404
+    assert client.post("/images/no-es-uuid/delete").status_code == 404

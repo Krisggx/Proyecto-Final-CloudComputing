@@ -1,7 +1,7 @@
 """Genera infra/imgproj-stack.yaml (la plantilla que se sube a CloudFormation).
 
 Toma infra/template.src.yaml e inserta:
-  __APP_PY_GZB64__        -> app/app.py comprimido (gzip + base64)
+  __APP_PY_GZB64__        -> app/app.py comprimido (xz + base64)
   __APP_REQUIREMENTS__    -> paquetes de app/requirements.txt
   __FILE:ruta__           -> contenido del archivo indicado, con la sangria de la linea
 
@@ -11,7 +11,7 @@ plantilla es autocontenida: no hace falta subir nada mas a AWS.
 Uso:  python infra/build_template.py
 """
 import base64
-import gzip
+import lzma
 import pathlib
 import re
 import sys
@@ -32,7 +32,7 @@ def main():
     app_py = read("app/app.py")
     if "${" in app_py:
         sys.exit("app.py contiene '${', que CloudFormation (Fn::Sub) interpretaria.")
-    gz = base64.b64encode(gzip.compress(app_py.encode("utf-8"), mtime=0)).decode("ascii")
+    gz = base64.b64encode(lzma.compress(app_py.encode("utf-8"), format=lzma.FORMAT_XZ, preset=9 | lzma.PRESET_EXTREME)).decode("ascii")
     text = text.replace("__APP_PY_GZB64__", gz)
 
     reqs = [l.strip() for l in read("app/requirements.txt").splitlines() if l.strip() and not l.startswith("#")]
