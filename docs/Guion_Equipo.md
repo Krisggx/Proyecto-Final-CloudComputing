@@ -67,7 +67,7 @@ Cada quien dice su línea:
 >
 > A la izquierda está la página de resultado, en modo claro: la imagen y, al lado, cada etiqueta con una barra que representa su nivel de confianza. Un detalle de seguridad: la imagen se muestra con un enlace temporal que dura 15 minutos, así que el bucket de S3 nunca es público.
 >
-> A la derecha está el historial en modo oscuro, en forma de galería, con todas las imágenes procesadas de la más reciente a la más antigua. Agregamos un botón para borrar el historial. Antes de borrar, el sistema pide confirmación, y lo que se elimina son los registros de la base de datos. Las imágenes se quedan en S3 como respaldo, porque decidimos que la aplicación no tenga permiso de borrar archivos. Eso es aplicar el principio de privilegio mínimo.
+> A la derecha está el historial en modo oscuro, en forma de galería, con todas las imágenes procesadas de la más reciente a la más antigua. Cada imagen tiene un botón de papelera para eliminarla sola, y también hay un botón para borrar todo el historial. Antes de borrar, el sistema siempre pide confirmación, y lo que se elimina son los registros de la base de datos. Las imágenes se quedan en S3 como respaldo, porque decidimos que la aplicación no tenga permiso de borrar archivos. Eso es aplicar el principio de privilegio mínimo.
 
 ## Diapositiva 7: Tecnologías (Jorge)
 
@@ -121,11 +121,11 @@ Cada quien dice su línea:
 >
 > Ahora hacemos lo mismo con un balanceador, pero como se haría un mantenimiento real: primero le decimos al balanceador de Amazon que deje de enviarle tráfico a haproxy-a y después lo apagamos. El sitio sigue respondiendo por haproxy-b. Al final lo volvemos a registrar.
 
-> **Jorge:** Por último, presiono "Borrar historial"… El sistema me pide confirmación, acepto, y el historial queda vacío. Vuelvo a analizar una imagen para que vean que todo sigue funcionando normalmente.
+> **Jorge:** Por último, elimino una sola imagen con su botón de papelera… El sistema me pide confirmación, acepto, y solo esa imagen desaparece del historial; las demás siguen ahí. Si quisiéramos vaciarlo todo, está el botón "Borrar historial".
 
 ## Diapositiva 12: Resultados (Edwin)
 
-> Hicimos catorce pruebas sobre el sistema real en AWS y las catorce cumplieron. Les quiero resaltar tres números.
+> Hicimos quince pruebas sobre el sistema real en AWS y las quince cumplieron. Les quiero resaltar tres números.
 >
 > El primero es cero: cero errores cuando apagamos una réplica de la aplicación, porque HAProxy reintentó en la otra.
 >
@@ -179,8 +179,8 @@ Respondan con calma y con sus palabras. Si la pregunta es sobre la parte de otro
 **¿Cómo demuestran que la base de datos no es pública?** (Edwin)
 > Su dirección resuelve a una IP privada, la 10.0.21.108, y al intentar conectarnos desde internet al puerto de PostgreSQL no hay respuesta. Además, la configuración de RDS muestra el acceso público desactivado.
 
-**¿Qué hace exactamente el botón de borrar historial?** (Jorge)
-> Borra todos los registros de la tabla de imágenes, y sus etiquetas se borran en cascada. Las imágenes se conservan en S3 porque la aplicación no tiene permiso de borrar archivos; eso es privilegio mínimo y además funciona como respaldo. Lo probamos en el sistema real y quedó registrado en los dos servidores.
+**¿Qué hacen los botones de borrar?** (Jorge)
+> El de papelera elimina solo esa imagen y "Borrar historial" borra todos los registros de la tabla de imágenes; en los dos casos las etiquetas se borran en cascada. Las imágenes se conservan en S3 porque la aplicación no tiene permiso de borrar archivos; eso es privilegio mínimo y además funciona como respaldo. Lo probamos en el sistema real y quedó registrado en los dos servidores.
 
 **¿Cómo actualizaron la aplicación sin apagar el sitio?** (Kris)
 > Una réplica a la vez. Mientras una se actualiza, la otra atiende. Y usamos una recarga suave: Gunicorn arranca los procesos con el código nuevo y deja que los anteriores terminen lo que estaban atendiendo. Así medimos cero errores en 133 solicitudes.
