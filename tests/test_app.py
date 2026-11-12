@@ -159,3 +159,29 @@ def test_delete_one_image(client, monkeypatch):
     assert "gato.png" in after and ">perro.jpg<" not in after
     assert client.post("/images/%s/delete" % first).status_code == 404
     assert client.post("/images/no-es-uuid/delete").status_code == 404
+
+
+def test_language_cookie_and_switch(client):
+    resp = client.get("/lang/en", headers={"Referer": "http://localhost/history"})
+    assert resp.status_code == 302 and resp.headers["Location"].endswith("/history")
+    assert "lang=en" in resp.headers.get("Set-Cookie", "")
+    page = client.get("/").get_data(as_text=True)
+    assert 'lang="en"' in page and "Analyze image" in page and "Discover what" in page
+    err = client.post("/upload", data={"image": (io.BytesIO(b"%PDF-1.4"), "doc.jpg")},
+                      content_type="multipart/form-data").get_data(as_text=True)
+    assert "The file content is not a valid JPG image." in err
+
+
+def test_language_kaqchikel_falls_back_to_spanish(client):
+    client.get("/lang/kaq")
+    page = client.get("/").get_data(as_text=True)
+    assert 'lang="cak"' in page and "Tanik&#39;oj" in page
+    assert "Sube una foto" in page  # texto largo sin traducir todavía: se usa el español
+
+
+def test_language_from_browser_and_invalid_code(client):
+    page = client.get("/", headers={"Accept-Language": "en-US,en;q=0.9"}).get_data(as_text=True)
+    assert "Analyze image" in page
+    assert client.get("/lang/xx").status_code == 404
+    resp = client.get("/lang/es", headers={"Referer": "http://evil.example/phish"})
+    assert resp.headers["Location"].endswith("/")
