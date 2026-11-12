@@ -63,7 +63,7 @@ Cada quien dice su línea:
 
 ## Diapositiva 6: La aplicación (Jorge)
 
-> Así se ve la aplicación. El diseño es minimalista y tiene modo claro y modo oscuro: al abrirla toma el tema del sistema, y con este botón de arriba a la derecha se cambia; el navegador recuerda la elección.
+> Así se ve la aplicación. El diseño es minimalista y tiene modo claro y modo oscuro: al abrirla toma el tema del sistema, y con este botón de arriba a la derecha se cambia; el navegador recuerda la elección. Junto a ese botón está el selector de idioma: la aplicación está en español, en inglés y en kaqchikel. El kaqchikel es un borrador: tradujimos la navegación y los botones, y lo que falta se muestra en español hasta que lo revise un hablante.
 >
 > A la izquierda está la página de resultado, en modo claro: la imagen y, al lado, cada etiqueta con una barra que representa su nivel de confianza. Un detalle de seguridad: la imagen se muestra con un enlace temporal que dura 15 minutos, así que el bucket de S3 nunca es público.
 >
@@ -101,7 +101,7 @@ Cada quien dice su línea:
 
 ## Diapositiva 10: Infraestructura como código (Kris)
 
-> Todo lo que hemos mostrado hasta ahora no lo creamos haciendo clic en la consola. Lo escribimos en una sola plantilla de AWS CloudFormation que crea los 39 recursos del sistema: la red con sus seis subredes, los cinco servidores, el balanceador, el bucket, la base de datos, el secreto y los permisos.
+> Todo lo que hemos mostrado hasta ahora no lo creamos haciendo clic en la consola. Lo escribimos en una sola plantilla de AWS CloudFormation que crea los 44 recursos del sistema: la red con sus seis subredes, los cinco servidores, el balanceador, el bucket, la base de datos, el secreto, los permisos y cinco parámetros donde viaja el código de la aplicación.
 >
 > Los servidores se configuran solos al encenderse: cada uno instala lo que le toca, escribe su configuración y arranca sus servicios. Eso tiene dos ventajas. La primera es que el sistema se puede recrear completo en unos veinte minutos, sin pasos manuales ni olvidos. La segunda es que la configuración queda escrita: si perdemos un servidor, lanzamos uno igual desde la consola con la opción «Lanzar más como esta», que copia la imagen, la red, los permisos y el script de arranque.
 >
@@ -125,13 +125,13 @@ Cada quien dice su línea:
 
 ## Diapositiva 12: Resultados (Edwin)
 
-> Hicimos quince pruebas sobre el sistema real en AWS y las quince cumplieron. Les quiero resaltar tres números.
+> Hicimos dieciséis pruebas sobre el sistema real en AWS y las dieciséis cumplieron. Les quiero resaltar tres números.
 >
 > El primero es cero: cero errores cuando apagamos una réplica de la aplicación, porque HAProxy reintentó en la otra.
 >
 > El segundo es nueve segundos, que es lo que tarda el balanceador de Amazon en detectar que un HAProxy se apagó de golpe. En esos nueve segundos hubo cinco errores de 41 solicitudes. Por eso, cuando hicimos el retiro ordenado, avisándole al balanceador antes de apagar, hubo cero errores de 66. Esto nos enseñó que el mantenimiento se debe hacer de forma ordenada.
 >
-> Y el tercero es cero de 133: cuando actualizamos la aplicación con recarga suave, una réplica a la vez, no hubo ningún error. Lo repetimos al instalar el diseño con modo oscuro y otra vez fueron cero errores, ahora de 111 solicitudes. La primera vez la habíamos actualizado reiniciando el servicio y hubo un error de 196, así que cambiamos el procedimiento.
+> Y el tercero es cero de 133: cuando actualizamos la aplicación con recarga suave, una réplica a la vez, no hubo ningún error. Lo repetimos al instalar el diseño con modo oscuro, el borrado por imagen y el cambio de idioma, y siempre fueron cero errores. La primera vez la habíamos actualizado reiniciando el servicio y hubo un error de 196, así que cambiamos el procedimiento.
 >
 > También cumplieron las pruebas de etiquetas, de validación de archivos, del historial y su borrado, de la consulta a la base de datos, de que la base no es pública y de que el código no tiene secretos. Todas tienen su captura en el informe.
 
@@ -178,6 +178,9 @@ Respondan con calma y con sus palabras. Si la pregunta es sobre la parte de otro
 
 **¿Cómo demuestran que la base de datos no es pública?** (Edwin)
 > Su dirección resuelve a una IP privada, la 10.0.21.108, y al intentar conectarnos desde internet al puerto de PostgreSQL no hay respuesta. Además, la configuración de RDS muestra el acceso público desactivado.
+
+**¿Por qué en kaqchikel?** (Jorge)
+> Porque el proyecto es de Campus Altiplano y queríamos que la aplicación se pudiera usar en un idioma de la región. Por ahora es un borrador: los botones y la navegación están traducidos y lo demás se muestra en español. Para terminarlo, solo hay que completar los textos en el archivo `app/i18n.py`, sin tocar el resto del código.
 
 **¿Qué hacen los botones de borrar?** (Jorge)
 > El de papelera elimina solo esa imagen y "Borrar historial" borra todos los registros de la tabla de imágenes; en los dos casos las etiquetas se borran en cascada. Las imágenes se conservan en S3 porque la aplicación no tiene permiso de borrar archivos; eso es privilegio mínimo y además funciona como respaldo. Lo probamos en el sistema real y quedó registrado en los dos servidores.

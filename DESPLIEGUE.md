@@ -121,6 +121,7 @@ El bastión trae tres comandos preparados:
 | P-10 | `sudo systemctl start imgapp` en app-a y `sudo systemctl start haproxy` en haproxy-a | Ambos vuelven a *healthy* sin hacer nada más |
 | P-11 | Desde tu PC: `psql -h ENDPOINT_RDS` o `nc -zv ENDPOINT_RDS 5432` | La conexión falla: RDS es privado |
 | P-12 | `git grep -n -E "BEGIN .*PRIVATE KEY\|aws_secret_access_key\|AKIA[0-9A-Z]{16}"` en el repositorio | Sin resultados: no hay llaves ni credenciales escritas |
+| P-16 | Elegir **English** y luego **Kaqchikel (borrador)** en el selector de idioma | La interfaz cambia de idioma; en kaqchikel, lo que falta por traducir se ve en español |
 
 **Ver las estadísticas de HAProxy (figuras 9 y 10).** Abre un túnel desde tu PC:
 
@@ -168,7 +169,7 @@ Antes de la presentación, toma un snapshot manual: **RDS → Actions → Take s
 
 | Archivo | Contenido |
 | --- | --- |
-| `app/app.py`, `app/requirements.txt` | Aplicación Flask |
+| `app/app.py`, `app/i18n.py`, `app/requirements.txt` | Aplicación Flask y sus textos en español, inglés y kaqchikel |
 | `haproxy/haproxy.cfg` | Configuración de HAProxy |
 | `db/schema.sql` | Esquema de la base de datos |
 | `systemd/imgapp.service` | Servicio de la aplicación |
@@ -179,7 +180,7 @@ Antes de la presentación, toma un snapshot manual: **RDS → Actions → Take s
 | `infra/imgproj-stack.yaml` | **Plantilla final que se sube a CloudFormation** |
 | `tests/test_app.py` | Pruebas automáticas de la aplicación (`pytest`) |
 
-Si cambias `app.py` o algún archivo de configuración, regenera la plantilla con este comando:
+Si cambias `app.py`, `i18n.py` o algún archivo de configuración, regenera la plantilla con este comando (el código viaja en parámetros de Systems Manager porque el *user data* de EC2 tiene un límite de 16 KB):
 
 ```bash
 python infra/build_template.py
