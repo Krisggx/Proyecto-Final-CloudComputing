@@ -63,9 +63,11 @@ Cada quien dice su línea:
 
 ## Diapositiva 6: La aplicación (Jorge)
 
-> Así se ve la aplicación. A la izquierda está la página de resultado: la imagen y, al lado, cada etiqueta con una barra que representa su nivel de confianza. Un detalle de seguridad: la imagen se muestra con un enlace temporal que dura 15 minutos, así que el bucket de S3 nunca es público.
+> Así se ve la aplicación. El diseño es minimalista y tiene modo claro y modo oscuro: al abrirla toma el tema del sistema, y con este botón de arriba a la derecha se cambia; el navegador recuerda la elección.
 >
-> A la derecha está el historial, en forma de galería, con todas las imágenes procesadas de la más reciente a la más antigua. Agregamos un botón para borrar el historial. Antes de borrar, el sistema pide confirmación, y lo que se elimina son los registros de la base de datos. Las imágenes se quedan en S3 como respaldo, porque decidimos que la aplicación no tenga permiso de borrar archivos. Eso es aplicar el principio de privilegio mínimo.
+> A la izquierda está la página de resultado, en modo claro: la imagen y, al lado, cada etiqueta con una barra que representa su nivel de confianza. Un detalle de seguridad: la imagen se muestra con un enlace temporal que dura 15 minutos, así que el bucket de S3 nunca es público.
+>
+> A la derecha está el historial en modo oscuro, en forma de galería, con todas las imágenes procesadas de la más reciente a la más antigua. Agregamos un botón para borrar el historial. Antes de borrar, el sistema pide confirmación, y lo que se elimina son los registros de la base de datos. Las imágenes se quedan en S3 como respaldo, porque decidimos que la aplicación no tenga permiso de borrar archivos. Eso es aplicar el principio de privilegio mínimo.
 
 ## Diapositiva 7: Tecnologías (Jorge)
 
@@ -129,7 +131,7 @@ Cada quien dice su línea:
 >
 > El segundo es nueve segundos, que es lo que tarda el balanceador de Amazon en detectar que un HAProxy se apagó de golpe. En esos nueve segundos hubo cinco errores de 41 solicitudes. Por eso, cuando hicimos el retiro ordenado, avisándole al balanceador antes de apagar, hubo cero errores de 66. Esto nos enseñó que el mantenimiento se debe hacer de forma ordenada.
 >
-> Y el tercero es cero de 133: cuando actualizamos la aplicación con recarga suave, una réplica a la vez, no hubo ningún error. La primera vez la habíamos actualizado reiniciando el servicio y hubo un error de 196, así que cambiamos el procedimiento.
+> Y el tercero es cero de 133: cuando actualizamos la aplicación con recarga suave, una réplica a la vez, no hubo ningún error. Lo repetimos al instalar el diseño con modo oscuro y otra vez fueron cero errores, ahora de 111 solicitudes. La primera vez la habíamos actualizado reiniciando el servicio y hubo un error de 196, así que cambiamos el procedimiento.
 >
 > También cumplieron las pruebas de etiquetas, de validación de archivos, del historial y su borrado, de la consulta a la base de datos, de que la base no es pública y de que el código no tiene secretos. Todas tienen su captura en el informe.
 
